@@ -1,0 +1,1675 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Stowage Plan Pro - Tracking Manual</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+    <style>
+        :root {
+            --bg-color: #e4e7eb;
+            --grid-line: #ccc;
+            --cell-size: 26px; 
+            --cell-border: #222;
+            --primary: #1a2a3a;
+            
+            /* Cores Dinâmicas dos Portos */
+            --port-lb: #e60000; 
+            --port-lh: #0073e6; 
+            --port-ba: #8cd962;
+            --port-na: #ffff4d; 
+            --port-ve: #ffa600; 
+            --port-tr: #800080;
+            --port-empty: #ffffff; 
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Arial, sans-serif; user-select: none; }
+
+        html, body { height: 100%; width: 100%; }
+
+        body { 
+            background-color: var(--bg-color); 
+            display: flex; 
+            flex-direction: column; 
+            height: 100vh; 
+            height: 100dvh; 
+            overflow: hidden; 
+        }
+
+        /* ================= MODAL INICIAL E LOADING ================= */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.7); z-index: 2000;
+            display: flex; justify-content: center; align-items: center;
+        }
+        .modal-content {
+            background: white; padding: 35px; border-radius: 8px; max-width: 650px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5); border-top: 6px solid var(--primary);
+        }
+        .modal-content h2 { color: var(--primary); margin-bottom: 20px; font-size: 24px; }
+        .modal-content ul { line-height: 1.7; margin-left: 20px; font-size: 15px; color: #333; margin-bottom: 25px;}
+        .modal-content li { margin-bottom: 10px; }
+        .btn-start {
+            background: #5cb85c; color: white; border: none; padding: 14px 20px; 
+            font-size: 16px; font-weight: bold; border-radius: 6px; cursor: pointer; width: 100%; transition: 0.2s;
+        }
+        .btn-start:hover { background: #4cae4c; transform: scale(1.02); }
+
+        #pdfLoadingOverlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255,255,255,0.95); z-index: 9999;
+            flex-direction: column; justify-content: center; align-items: center;
+        }
+        #pdfLoadingOverlay h2 { color: var(--primary); font-size: 24px; margin-bottom: 10px; }
+        #pdfLoadingOverlay p { color: #555; font-size: 16px; }
+        .spinner {
+            border: 6px solid #f3f3f3; border-top: 6px solid var(--primary);
+            border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin-bottom: 20px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        header {
+            background-color: var(--primary); color: white; padding: 12px 20px;
+            display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3); z-index: 100;
+        }
+
+        .header-title { display: flex; align-items: center; gap: 15px; }
+        .header-title h2 { font-size: 20px; margin: 0; }
+        
+        .header-controls { display: flex; gap: 10px; align-items: center; }
+        .tabs { display: flex; gap: 10px; border-right: 2px solid rgba(255,255,255,0.2); padding-right: 15px; margin-right: 5px;}
+        
+        .tab-btn {
+            background: #2a3a4a; color: white; border: none; padding: 8px 16px; 
+            border-radius: 4px; cursor: pointer; font-weight: bold; transition: 0.2s;
+        }
+        .tab-btn.active { background: #5cb85c; box-shadow: 0 0 8px rgba(92,184,92,0.6); }
+
+        .btn-edit, .btn-export {
+            background: #d9534f; color: white; border: none; padding: 8px 16px; 
+            border-radius: 4px; cursor: pointer; font-weight: bold; transition: 0.2s;
+        }
+        .btn-edit.active { background: #5cb85c; box-shadow: 0 0 8px rgba(92,184,92,0.6); }
+        .btn-export { background: #3498db; }
+        .btn-export:hover { background: #2980b9; }
+
+        main { display: flex; flex: 1; overflow: hidden; min-height: 0; }
+
+        /* ================= TELA 1: LISTA DE CARGA (INPUT) ================= */
+        #cargoView { display: flex; width: 100%; height: 100%; min-height: 0; background: #fff; flex-direction: column; user-select: auto; overflow: hidden;}
+        .cargo-header { padding: 20px; background: #fafafa; border-bottom: 1px solid #ddd; position: relative; flex-shrink: 0;}
+        
+        .color-picker-group { display: flex; gap: 15px; margin-top: 15px; align-items: center; background: #eee; padding: 10px; border-radius: 6px;}
+        .color-picker-group h4 { margin: 0; font-size: 13px; color: #333; }
+        .color-picker-label { display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: bold; cursor: pointer; padding: 4px 8px; background: white; border: 1px solid #ccc; border-radius: 4px;}
+        .color-picker-label input { width: 20px; height: 20px; padding: 0; border: none; cursor: pointer; background: none;}
+
+        .cargo-table-container { flex: 1; padding: 20px 20px 80px 20px; overflow-y: auto; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 13px; }
+        th { background-color: #f4f4f4; position: sticky; top: 0; z-index: 10;}
+        td input[type="number"], td select { width: 100%; padding: 6px; border: 1px solid #ccc; font-size: 13px; border-radius: 4px;}
+        .attr-checks { display: flex; flex-wrap: wrap; gap: 8px;}
+        .attr-checks label { display: flex; align-items: center; font-size: 11px; cursor: pointer; background: #f9f9f9; padding: 4px 6px; border: 1px solid #eee; border-radius: 4px;}
+        .attr-checks label:hover { background: #eef5ff; border-color: var(--primary); }
+        .attr-checks input { width: auto; margin-right: 4px; }
+        
+        .btn-add { background: #5cb85c; color: white; border: none; padding: 8px 16px; cursor: pointer; border-radius: 4px; font-weight: bold; margin-right: 10px; }
+        .btn-clear-row { background: #f8f9fa; border: 1px dashed #d9534f; color: #d9534f; cursor: pointer; padding: 6px 10px; font-weight: bold; border-radius: 4px;}
+        .btn-clear-row:hover { background: #fee; }
+        .btn-reset-data { background: #d9534f; color: white; border: none; padding: 8px 16px; cursor: pointer; border-radius: 4px; font-weight: bold; }
+        .btn-reset-data:hover { background: #c9302c; }
+
+        /* ================= TELA 2: PLANO MANUAL & VISÃO ================= */
+        #manualView { display: none; width: 100%; height: 100%; min-height: 0;}
+        
+        .sidebar {
+            width: 360px; background-color: #fff; border-right: 2px solid #ccc;
+            display: flex; flex-direction: column; overflow-y: auto; flex-shrink: 0; padding-bottom: 40px;
+        }
+
+        .tool-section { padding: 15px; border-bottom: 1px solid #eee; background: #fafafa; }
+        .tool-section h3 { font-size: 13px; margin-bottom: 10px; color: #444; text-transform: uppercase; }
+
+        .bay-selector {
+            width: 100%; padding: 10px; font-size: 16px; font-weight: bold;
+            background: #eef5ff; border: 2px solid var(--primary); border-radius: 6px; cursor: pointer;
+        }
+
+        .action-btns { display: flex; gap: 8px; margin-top: 10px; }
+        .btn-filter { flex: 1; background: #34495e; color: white; border: none; padding: 8px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 11px;}
+        .btn-filter.active { background: #f39c12; }
+
+        /* PAINEL DE EXPANSÃO DA GRADE */
+        .grid-edit-panel { background: #ffebee; border: 1px solid #ffcaca; border-radius: 6px; padding: 12px; margin-bottom: 15px; display: none; }
+        .grid-edit-panel h4 { margin: 0 0 10px 0; color: #c9302c; font-size: 13px; text-align: center; }
+        .grid-edit-select { width: 100%; padding: 6px; font-weight: bold; margin-bottom: 10px; border-radius: 4px; border: 1px solid #ccc; }
+        .grid-edit-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .grid-edit-row span { font-size: 11px; font-weight: bold; color: #333; }
+        .grid-edit-btns button { background: white; border: 1px solid #ccc; border-radius: 4px; padding: 2px 10px; cursor: pointer; font-weight: bold; font-size: 14px; }
+        .grid-edit-btns button:hover { background: #eee; }
+
+        .inventory-container { flex: 1; overflow-y: auto; background: #fff; }
+        .inventory-header { padding: 10px 15px; background: #1a2a3a; color: white; font-size: 12px; font-weight: bold; position: sticky; top: 0; z-index: 10; display:flex; justify-content: space-between; align-items:center;}
+        .btn-deselect { background: transparent; border: 1px solid white; color: white; padding: 3px 8px; border-radius: 3px; cursor:pointer; font-size: 10px;}
+        .btn-deselect:hover { background: rgba(255,255,255,0.2); }
+
+        .palette-item {
+            display: flex; align-items: center; padding: 12px 15px; border-bottom: 1px solid #eee;
+            cursor: pointer; transition: 0.1s; background: white;
+        }
+        .palette-item:hover { background: #f4f7f6; }
+        .palette-item.active { background: #eef5ff; border-left: 5px solid var(--primary); padding-left: 10px; }
+        .palette-item.complete { opacity: 0.4; cursor: not-allowed; background: #f9f9f9;}
+        
+        .palette-cell {
+            width: 32px; height: 32px; border: 1px solid #111; position: relative;
+            display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-right: 15px;
+            box-shadow: 1px 1px 3px rgba(0,0,0,0.2); background-color: var(--port-empty);
+        }
+        .palette-port { font-size: 11px; font-weight: bold; position: relative; z-index: 20; color: #000; text-shadow: 0 0 3px rgba(255,255,255,0.9); }
+        .palette-info { flex: 1; }
+        .palette-title { font-size: 12px; font-weight: bold; color: #222; }
+        .palette-mods { font-size: 10px; color: #666; margin-top: 2px;}
+        
+        .palette-counter {
+            font-size: 13px; font-weight: bold; background: var(--primary); color: white;
+            padding: 4px 10px; border-radius: 12px; min-width: 45px; text-align: center; letter-spacing: 0.5px;
+        }
+        .palette-counter.zero { background: #888; }
+
+        .canvas-area {
+            flex: 1; padding: 30px 30px 80px 30px; overflow: auto; display: flex; flex-direction: column; align-items: center; background-color: var(--bg-color);
+        }
+        
+        /* GRIDS & BAYS */
+        .bay-pair-wrapper { display: flex; flex-direction: column; align-items: center; margin-bottom: 40px;}
+        .pair-container { display: flex; gap: 40px; justify-content: center; flex-wrap: nowrap; align-items: flex-start;}
+        
+        .bay-container-wrapper { display: flex; flex-direction: column; align-items: center; }
+        .bay-container-wrapper h3 { font-size: 24px; color: #111; margin: 0 0 10px 0; letter-spacing: 1px;}
+        
+        .bay-container {
+            display: flex; flex-direction: column; align-items: center; background: white;
+            padding: 15px 25px; border-radius: 8px; box-shadow: 0 6px 16px rgba(0,0,0,0.15); border: 1px solid #ddd;
+        }
+
+        .axis-title { text-align: center; font-size: 13px; font-weight: bold; letter-spacing: 2px; color: #444; margin-bottom: 2px;}
+        .axis-title-tier { writing-mode: vertical-rl; transform: rotate(180deg); text-align: center; font-size: 13px; font-weight: bold; letter-spacing: 2px; color: #444; margin-right: 5px;}
+        .bay-grid-flex { display: flex; align-items: center; }
+
+        /* TRAVAS DE ALINHAMENTO MATEMÁTICO */
+        .axis-row { display: flex; margin-bottom: 0px; }
+        .axis-col-labels { display: flex; border: none; }
+        
+        .axis-label { 
+            width: var(--cell-size); 
+            min-width: var(--cell-size); 
+            flex-shrink: 0; 
+            text-align: center; 
+            font-size: 11px; 
+            font-weight: bold; 
+            color: #666; 
+            box-sizing: border-box; 
+        }
+        
+        .row-label { 
+            width: 24px; 
+            min-width: 24px; 
+            flex-shrink: 0; 
+            display: flex; 
+            align-items: center; 
+            justify-content: flex-end; 
+            margin-right: 4px; 
+            font-size: 11px; 
+            font-weight: bold; 
+            color: #666; 
+            box-sizing: border-box; 
+        }
+        
+        .deck-separator { width: 100%; height: 6px; background-color: #111; margin: 6px 0; border-radius: 2px;}
+        
+        .grid-row { display: flex; }
+        .cell {
+            width: var(--cell-size); 
+            min-width: var(--cell-size); 
+            height: var(--cell-size); 
+            flex-shrink: 0; 
+            border: 1px solid var(--cell-border);
+            background-color: var(--port-empty); 
+            position: relative; 
+            cursor: pointer; 
+            display: flex;
+            align-items: center; 
+            justify-content: center; 
+            transition: 0.1s; 
+            box-sizing: border-box;
+        }
+        
+        .cell:hover { opacity: 0.8; border: 2px solid #000; z-index: 50;}
+        .cell.hidden { visibility: hidden; border: none; pointer-events: none; }
+        
+        .edit-mode-active .cell { cursor: cell; pointer-events: auto !important;}
+        .edit-mode-active .cell.hidden { visibility: visible; background-color: #eee; border: 1px dashed #aaa; opacity: 0.6; }
+        
+        .edit-mode-active .axis-label, .edit-mode-active .row-label {
+            background-color: #fff9c4; border: 1px dashed #f57f17; border-radius: 3px; cursor: text;
+        }
+
+        .port-text { font-size: 11px; font-weight: bold; color: #000; position: relative; z-index: 20; pointer-events: none; text-shadow: 0px 0px 3px rgba(255,255,255,0.9); }
+
+        /* ================= SÍMBOLOS CSS ================= */
+        .layer { position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; z-index: 5; }
+        .layer.base-opentop { border-top: 4px solid #111; }
+        .layer.base-platform { border-bottom: 4px solid #111; }
+        .layer.base-imo::before { content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(45deg); width: 12px; height: 12px; border: 1.5px solid #111; }
+        .layer.base-livestock::after { content: 'LS'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 9px; font-weight: bold; color: #111; }
+        .layer.base-tank::before { content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid #111; }
+        .layer.base-tank::after { content: 'T'; position: absolute; top: 2px; right: 3px; font-size: 8px; font-weight: bold; color: #111; }
+        
+        /* "X" DE 40 PÉS */
+        .layer.base-blocked40 { background-color: #ffffff !important; border: 1px solid #111; }
+        .layer.base-blocked40::before { 
+            content: 'X'; 
+            position: absolute; 
+            top: 50%; left: 50%; 
+            transform: translate(-50%, -50%); 
+            font-size: 26px; 
+            font-weight: normal; 
+            font-family: 'Segoe UI', Arial, sans-serif;
+            color: #666; 
+            z-index: 30; 
+        }
+
+        /* ====== FLAT RACK, OW, OH, OL ====== */
+        .layer.base-flatrack::before { 
+            content: ''; 
+            position: absolute; 
+            bottom: 0; left: 0; right: 0; height: 25%; 
+            background: linear-gradient(to bottom right, transparent 48%, #111 50%) left / 40% 100% no-repeat, 
+                        linear-gradient(#111, #111) right / 60% 100% no-repeat;
+        }
+
+        .layer.mod-oh { z-index: 25; }
+        .layer.mod-oh::after { 
+            content: ''; 
+            position: absolute; 
+            top: -6px; left: 10%; right: 10%; height: 6px; 
+            border: 1.5px solid #111; border-bottom: none; border-radius: 20px 20px 0 0; 
+        }
+
+        .layer.mod-ow { z-index: 25; }
+        .layer.mod-ow::before { 
+            content: ''; 
+            position: absolute; 
+            left: -6px; top: 10%; bottom: 10%; width: 6px; 
+            border: 1.5px solid #111; border-right: none; border-radius: 20px 0 0 20px; 
+        }
+        .layer.mod-ow::after { 
+            content: ''; 
+            position: absolute; 
+            right: -6px; top: 10%; bottom: 10%; width: 6px; 
+            border: 1.5px solid #111; border-left: none; border-radius: 0 20px 20px 0; 
+        }
+
+        .layer.mod-ol { z-index: 25; }
+        .layer.mod-ol::after { 
+            content: ''; 
+            position: absolute; 
+            top: 0px; left: 10%; right: 10%; height: 6px; 
+            border: 1.5px solid #111; border-top: none; border-radius: 0 0 20px 20px; 
+        }
+
+        .layer.mod-hc::before { content: ''; position: absolute; top: 0; left: 0; width: 8px; height: 8px; border-right: 1.5px solid #111; border-bottom: 1.5px solid #111; border-radius: 0 0 100% 0; }
+        .layer.mod-empty::after { content: 'E'; position: absolute; top: 2px; right: 3px; font-size: 8px; font-weight: bold; color: #111; }
+        .layer.mod-reefer::after { content: 'R'; position: absolute; top: 2px; right: 3px; font-size: 8px; font-weight: bold; color: #111; }
+        .layer.mod-ol::after { content: 'OL'; position: absolute; bottom: 1px; left: 50%; transform: translateX(-50%); font-size: 8px; font-weight: bold; color: #111; }
+        
+        .layer.mod-imo5::after { content: '5'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 9px; font-weight: bold; color: #111; }
+        .layer.mod-imo8::after { content: '8'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 9px; font-weight: bold; color: #111; }
+
+        .filter-imo .cell:not(:has(.base-imo)):not(:has(.mod-imo5)):not(:has(.mod-imo8)) { opacity: 0.15; }
+        .filter-reefer .cell:not(:has(.mod-reefer)) { opacity: 0.15; }
+
+        /* ================= ÁREA DE EXPORTAÇÃO PDF ================= */
+        #printArea {
+            display: none; 
+            width: 100%;
+            background: #ffffff;
+            margin: 0 auto;
+        }
+
+        .pdf-page {
+            width: 290mm;
+            height: 195mm; 
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: white;
+            box-sizing: border-box;
+            page-break-after: always;
+            overflow: hidden;
+            margin: 0 auto;
+        }
+
+        .pdf-page .bay-pair-wrapper { width: 100%; transform: scale(1.05); transform-origin: top center; }
+        .pdf-page .cell { border: 1px solid #111 !important; }
+        .pdf-page .deck-separator { background-color: #000 !important; }
+        .pdf-page .bay-container { border: 2px solid #aaa !important; box-shadow: none !important;}
+
+    </style>
+</head>
+<body>
+
+    <div id="pdfLoadingOverlay">
+        <div class="spinner"></div>
+        <h2>Processando Dados...</h2>
+        <p>Isso pode levar alguns segundos. Não feche a página.</p>
+    </div>
+
+    <div id="welcomeModal" class="modal-overlay">
+        <div class="modal-content">
+            <h2>🚢 Stowage Plan Pro - Bem-vindo</h2>
+            <ul>
+                <li><strong style="color: #d9534f;">MUDE AS CORES (OBRIGATÓRIO):</strong> Vá na aba "1. Lista de Carga", logo abaixo, e altere a paleta de cores dos portos clicando nas caixas de cor.</li>
+                <li><strong>Auto-Estivagem (NOVO):</strong> Importe seu JSON e clique no botão roxo "Auto-Stow Inteligente" para preencher todos os seus Reefers, IMOs e containers Dry automaticamente respeitando as regras físicas (Pêndulo Simétrico, Gravidade e LIFO).</li>
+                <li><strong>Exportar/Importar Arquivo:</strong> Você pode baixar e carregar arquivos JSON na aba Lista de Carga para não perder seu trabalho ou compartilhar seu plano.</li>
+                <li><strong>Edição de Grade Individual:</strong> Clicando em "Editar Casco" você pode expandir as colunas e linhas da Bay que você selecionar. Além disso, você pode <strong>clicar no nome dos Tiers e Rolls no próprio desenho</strong> para renomeá-los.</li>
+            </ul>
+            <button id="closeModalBtn" class="btn-start">Entendido, vamos começar!</button>
+        </div>
+    </div>
+
+    <header>
+        <div class="header-title">
+            <h2>Stowage Plan Pro 🚢</h2>
+        </div>
+        <div class="header-controls">
+            <div class="tabs">
+                <button class="tab-btn active" id="tabCargo">1. Lista de Carga</button>
+                <button class="tab-btn" id="tabManual">2. Plano Manual</button>
+            </div>
+            <button id="toggleEditBtn" class="btn-edit" title="Desenhe o contorno do casco e expanda o grid" style="display:none;">✎ Editar Casco</button>
+            <button id="exportPdfBtn" class="btn-export" title="Gerar arquivo PDF final">📄 Exportar PDF</button>
+        </div>
+    </header>
+
+    <main>
+        <section id="cargoView">
+            <div class="cargo-header">
+                <h3 style="margin-bottom: 5px;">Tabela de Contêineres (Viagem 02 NB Carregada)</h3>
+                <p style="font-size: 13px; color: #555;">A lista padrão com Portos de Origem (POL) e Descarga (POD) já foi carregada.</p>
+                
+                <div class="color-picker-group">
+                    <h4>Cores de Descarga (POD):</h4>
+                    <label class="color-picker-label">LB <input type="color" id="color-lb" value="#e60000"></label>
+                    <label class="color-picker-label">LH <input type="color" id="color-lh" value="#0073e6"></label>
+                    <label class="color-picker-label">BA <input type="color" id="color-ba" value="#8cd962"></label>
+                    <label class="color-picker-label">NA <input type="color" id="color-na" value="#ffff4d"></label>
+                    <label class="color-picker-label">VE <input type="color" id="color-ve" value="#ffa600"></label>
+                    <label class="color-picker-label">TR <input type="color" id="color-tr" value="#800080"></label>
+                </div>
+            </div>
+            
+            <div class="cargo-table-container">
+                <table id="cargoTable">
+                    <thead>
+                        <tr>
+                            <th style="width: 70px;">POL</th>
+                            <th style="width: 70px;">POD</th>
+                            <th style="width: 60px;">Qtd</th>
+                            <th>Tamanho</th>
+                            <th>Tipo Base</th>
+                            <th>Modificadores (Acumulativos)</th>
+                            <th style="width: 140px;">Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="cargoTbody">
+                        </tbody>
+                </table>
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                    <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                        <button class="btn-add" id="addCargoRowBtn">+ Adicionar Linha</button>
+                        <button class="btn-export" id="btnExportJson" style="padding: 8px 16px; border-radius: 4px; border: none; background: #3498db; color: white; font-weight: bold; cursor: pointer;">📥 Exportar JSON</button>
+                        <button class="btn-add" id="btnImportJson" style="background: #f39c12;">📂 Importar JSON</button>
+                        <input type="file" id="importJsonInput" accept=".json" style="display:none">
+                        
+                        <button id="btnAutoStow" style="background: #8e44ad; border: none; padding: 8px 16px; border-radius: 4px; color: white; font-weight: bold; cursor: pointer; transition: 0.2s;" onmouseover="this.style.background='#732d91'" onmouseout="this.style.background='#8e44ad'">🪄 Auto-Stow Inteligente</button>
+                    </div>
+                    <button class="btn-reset-data" id="btnResetData" title="Apaga todas as cargas salvas no navegador">⚠️ Resetar Dados LocalStorage</button>
+                </div>
+            </div>
+        </section>
+
+        <section id="manualView">
+            <aside class="sidebar">
+                
+                <div id="gridEditPanel" class="grid-edit-panel">
+                    <h4>⚙️ Expandir Grade da Bay</h4>
+                    <select id="editGridBaySelect" class="grid-edit-select"></select>
+                    <p style="font-size: 11px; text-align: center; color: #666; margin-bottom: 10px;">Clique diretamente nos números do eixo no desenho para renomear.</p>
+                    
+                    <div class="grid-edit-row">
+                        <span>Centro (Roll 00)</span>
+                        <div class="grid-edit-btns">
+                            <button id="btnToggleRoll00">Alternar</button>
+                        </div>
+                    </div>
+                    <div class="grid-edit-row">
+                        <span>Colunas (Rolls)</span>
+                        <div class="grid-edit-btns">
+                            <button id="btnRemRoll">-</button>
+                            <button id="btnAddRoll">+</button>
+                        </div>
+                    </div>
+                    <div class="grid-edit-row">
+                        <span>Convés (Tiers Top)</span>
+                        <div class="grid-edit-btns">
+                            <button id="btnRemTierAbove">-</button>
+                            <button id="btnAddTierAbove">+</button>
+                        </div>
+                    </div>
+                    <div class="grid-edit-row">
+                        <span>Porão (Tiers Bot)</span>
+                        <div class="grid-edit-btns">
+                            <button id="btnRemTierBelow">-</button>
+                            <button id="btnAddTierBelow">+</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tool-section">
+                    <h3>⚓ Selecionar Par de Bays</h3>
+                    <select class="bay-selector" id="baySelect"></select>
+                    
+                    <div class="action-btns">
+                        <button class="btn-filter" id="btnFilterIMO">🔍 Ver IMO</button>
+                        <button class="btn-filter" id="btnFilterReefer">❄️ Ver Reefer</button>
+                    </div>
+                </div>
+
+                <div class="inventory-container">
+                    <div class="inventory-header">
+                        <span>LISTA DE CARGA (POL > POD)</span>
+                        <button class="btn-deselect" id="btnDeselect">Desmarcar</button>
+                    </div>
+                    <div id="inventoryList">
+                        </div>
+                </div>
+            </aside>
+
+            <section class="canvas-area" id="canvasArea">
+                <div id="pairContainer">
+                    </div>
+            </section>
+        </section>
+    </main>
+
+    <div id="printArea"></div>
+
+    <script>
+        // --- 1. DEFINIÇÕES DA ESTRUTURA E TOPOLOGIA ---
+        const COLS_DEFAULT = ['12','10','08','06','04','02','00','01','03','05','07','09','11'];
+        const ROWS_ABOVE_DEFAULT = ['92','90','88','86','84','82'];
+        const ROWS_BELOW_DEFAULT = ['16','14','12','10','08','06','04','02'];
+        
+        const BAY_PAIRS = [
+            ['01','03'], ['05','07'], ['09','11'], ['13','15'],
+            ['17','19'], ['21','23'], ['25','27'], ['33','35'], ['37','39'],
+            ['01 IMO','03 IMO'], ['05 IMO','07 IMO'],
+            ['17 REEFER','19 REEFER'], ['33 REEFER','35 REEFER'], ['37 REEFER','39 REEFER']
+        ];
+
+        let shipTopology = {}; 
+        let savedShip = {};    
+        let currentPairIdx = 0;
+        let bayGrids = {}; 
+        
+        let lastClickedCell = null; 
+        let isShiftActionFill = true; 
+        
+        let currentState = { editMode: false };
+        let activeInvId = null; 
+
+        let globalInventory = [];
+
+        // --- 2. DADOS DA CARGA ATUALIZADOS COM POL E POD DO PDF ---
+        const cargoData2026 = [
+            { pol: 'RG', pod: 'TR', qty: 15, size: '20', base: 'dry', mods: [] },
+            { pol: 'RG', pod: 'VE', qty: 20, size: '20', base: 'dry', mods: [] },
+            { pol: 'RG', pod: 'TR', qty: 15, size: '40', base: 'dry', mods: ['hc'] },
+            { pol: 'RG', pod: 'TR', qty: 30, size: '40', base: 'opentop', mods: [] },
+            { pol: 'RG', pod: 'TR', qty: 20, size: '40', base: 'dry', mods: ['reefer', 'hc'] },
+            { pol: 'RG', pod: 'TR', qty: 4,  size: '20', base: 'opentop', mods: ['oh'] },
+            { pol: 'PG', pod: 'VE', qty: 20, size: '40', base: 'dry', mods: ['reefer', 'hc'] },
+            { pol: 'PG', pod: 'VE', qty: 10, size: '20', base: 'dry', mods: [] },
+            { pol: 'PG', pod: 'BA', qty: 2,  size: '40', base: 'opentop', mods: ['hc'] },
+            { pol: 'PG', pod: 'VE', qty: 20, size: '20', base: 'dry', mods: [] },
+            { pol: 'PG', pod: 'VE', qty: 30, size: '20', base: 'opentop', mods: [] },
+            { pol: 'PG', pod: 'VE', qty: 8,  size: '20', base: 'tank', mods: [] },
+            { pol: 'PG', pod: 'VE', qty: 10, size: '40', base: 'flatrack', mods: ['empty'] },
+            { pol: 'PG', pod: 'VE', qty: 6,  size: '20', base: 'flatrack', mods: [] },
+            { pol: 'PG', pod: 'VE', qty: 2,  size: '20', base: 'flatrack', mods: ['oh'] },
+            { pol: 'PG', pod: 'VE', qty: 4,  size: '40', base: 'opentop', mods: ['oh', 'hc'] },
+            { pol: 'PG', pod: 'VE', qty: 20, size: '20', base: 'dry', mods: [] },
+            { pol: 'ST', pod: 'NA', qty: 6,  size: '40', base: 'imo', mods: ['imo8', 'hc'] },
+            { pol: 'ST', pod: 'LH', qty: 6,  size: '40', base: 'imo', mods: ['imo5', 'hc'] },
+            { pol: 'ST', pod: 'BA', qty: 20, size: '40', base: 'dry', mods: ['reefer', 'hc'] },
+            { pol: 'ST', pod: 'LH', qty: 18, size: '40', base: 'dry', mods: [] },
+            { pol: 'ST', pod: 'LH', qty: 5,  size: '40', base: 'flatrack', mods: ['ow', 'oh'] },
+            { pol: 'ST', pod: 'VE', qty: 14, size: '20', base: 'dry', mods: [] },
+            { pol: 'ST', pod: 'VE', qty: 15, size: '20', base: 'dry', mods: ['empty'] },
+            { pol: 'ST', pod: 'NA', qty: 20, size: '40', base: 'dry', mods: ['empty'] },
+            { pol: 'ST', pod: 'NA', qty: 8,  size: '40', base: 'dry', mods: ['hc'] },
+            { pol: 'RJ', pod: 'LB', qty: 10, size: '20', base: 'dry', mods: ['empty', 'hc'] },
+            { pol: 'RJ', pod: 'LB', qty: 10, size: '20', base: 'platform', mods: ['empty'] },
+            { pol: 'RJ', pod: 'LB', qty: 26, size: '40', base: 'dry', mods: ['hc'] },
+            { pol: 'RJ', pod: 'LH', qty: 20, size: '40', base: 'dry', mods: ['reefer', 'hc'] },
+            { pol: 'RJ', pod: 'LH', qty: 10, size: '45', base: 'dry', mods: ['hc'] },
+            { pol: 'RJ', pod: 'NA', qty: 20, size: '40', base: 'dry', mods: [] },
+            { pol: 'RJ', pod: 'NA', qty: 2,  size: '40', base: 'flatrack', mods: ['ow', 'hc'] },
+            { pol: 'RJ', pod: 'NA', qty: 18, size: '40', base: 'dry', mods: [] },
+            { pol: 'SU', pod: 'LB', qty: 5,  size: '40', base: 'flatrack', mods: ['ow', 'oh'] },
+            { pol: 'SU', pod: 'LB', qty: 26, size: '40', base: 'dry', mods: ['hc'] },
+            { pol: 'SU', pod: 'NA', qty: 20, size: '40', base: 'dry', mods: ['reefer', 'hc'] },
+            { pol: 'SU', pod: 'BA', qty: 8,  size: '20', base: 'opentop', mods: [] },
+            { pol: 'SU', pod: 'LB', qty: 10, size: '40', base: 'dry', mods: ['reefer', 'hc'] },
+            { pol: 'SU', pod: 'BA', qty: 10, size: '40', base: 'dry', mods: ['reefer', 'hc'] },
+            { pol: 'SU', pod: 'NA', qty: 2,  size: '40', base: 'platform', mods: ['ol'] },
+            { pol: 'SU', pod: 'LH', qty: 16, size: '40', base: 'flatrack', mods: ['empty'] },
+            { pol: 'SU', pod: 'LH', qty: 20, size: '40', base: 'dry', mods: ['reefer', 'hc'] },
+            { pol: 'SU', pod: 'LH', qty: 2,  size: '40', base: 'platform', mods: ['ol'] },
+            { pol: 'SU', pod: 'LB', qty: 20, size: '20', base: 'dry', mods: [] },
+            { pol: 'SU', pod: 'LB', qty: 2,  size: '40', base: 'flatrack', mods: ['ow', 'oh'] },
+            { pol: 'SU', pod: 'LH', qty: 10, size: '40', base: 'dry', mods: ['reefer', 'hc'] },
+            { pol: 'PE', pod: 'LH', qty: 2,  size: '40', base: 'opentop', mods: ['oh', 'hc'] },
+            { pol: 'PE', pod: 'LB', qty: 2,  size: '40', base: 'flatrack', mods: ['ow'] },
+            { pol: 'PE', pod: 'LB', qty: 10, size: '40', base: 'opentop', mods: ['oh'] },
+            { pol: 'PE', pod: 'LH', qty: 20, size: '40', base: 'dry', mods: ['reefer', 'hc'] },
+            { pol: 'PE', pod: 'LB', qty: 20, size: '40', base: 'dry', mods: ['empty', 'hc'] },
+            { pol: 'PE', pod: 'LB', qty: 10, size: '20', base: 'tank', mods: [] },
+            { pol: 'PE', pod: 'LB', qty: 10, size: '20', base: 'flatrack', mods: ['empty'] },
+            { pol: 'PE', pod: 'LH', qty: 10, size: '45', base: 'dry', mods: ['hc'] }
+        ];
+
+        // --- SISTEMA DE SALVAMENTO LOCAL & JSON ---
+        function persistData() {
+            const dataToSave = {
+                version: 2, 
+                shipTopology,
+                savedShip,
+                globalInventory,
+                bayGrids
+            };
+            localStorage.setItem('stowagePlanData', JSON.stringify(dataToSave));
+        }
+
+        function loadPersistedData() {
+            const stored = localStorage.getItem('stowagePlanData');
+            if (stored) {
+                try {
+                    const parsed = JSON.parse(stored);
+                    if (parsed.version !== 2) return false; 
+                    
+                    shipTopology = parsed.shipTopology || {};
+                    savedShip = parsed.savedShip || {};
+                    globalInventory = parsed.globalInventory || [];
+                    
+                    // Auto-Cura e Migração POL: Se carregar um inventory velho sem POL, migramos automaticamente baseado na lista 2026.
+                    globalInventory.forEach((inv, idx) => {
+                        if (!inv.pol && cargoData2026[idx]) inv.pol = cargoData2026[idx].pol;
+                        else if (!inv.pol) inv.pol = 'RG';
+                    });
+
+                    bayGrids = parsed.bayGrids || {};
+
+                    // Auto-Cura de Casco
+                    BAY_PAIRS.forEach(pair => {
+                        pair.forEach(b => {
+                            if (!bayGrids[b] || !bayGrids[b].cols) {
+                                bayGrids[b] = { cols: [...COLS_DEFAULT], rowsAbove: [...ROWS_ABOVE_DEFAULT], rowsBelow: [...ROWS_BELOW_DEFAULT] };
+                            }
+                            if (!shipTopology[b]) {
+                                shipTopology[b] = {};
+                                let allR = [...bayGrids[b].rowsAbove, ...bayGrids[b].rowsBelow];
+                                allR.forEach(r => {
+                                    bayGrids[b].cols.forEach(c => { shipTopology[b][`${r}-${c}`] = isCellHiddenDefault(b, r, c); });
+                                });
+                            }
+                            if (!savedShip[b]) savedShip[b] = {};
+                        });
+                    });
+
+                    return true;
+                } catch(e) {
+                    console.error("Erro ao carregar dados", e);
+                    return false;
+                }
+            }
+            return false;
+        }
+
+        function resetLocalData() {
+            if (confirm("Isso apagará todo o seu progresso local e carregará o navio vazio. Tem certeza?")) {
+                localStorage.removeItem('stowagePlanData');
+                location.reload();
+            }
+        }
+
+        function setupJsonExportImport() {
+            document.getElementById('btnExportJson').addEventListener('click', () => {
+                const data = localStorage.getItem('stowagePlanData');
+                if(!data) { alert('Nenhum dado salvo para exportar.'); return; }
+                const blob = new Blob([data], {type: 'application/json'});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'stowage_plan_backup.json';
+                a.click();
+                URL.revokeObjectURL(url);
+            });
+
+            document.getElementById('btnImportJson').addEventListener('click', () => {
+                document.getElementById('importJsonInput').click();
+            });
+
+            document.getElementById('importJsonInput').addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if(!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    try {
+                        const parsed = JSON.parse(ev.target.result);
+                        if(parsed.shipTopology && parsed.savedShip) {
+                            // Migra dados de POL se o JSON injetado for o antigo
+                            if(parsed.globalInventory) {
+                                parsed.globalInventory.forEach((inv, idx) => {
+                                    if(!inv.pol && cargoData2026[idx]) inv.pol = cargoData2026[idx].pol;
+                                    else if(!inv.pol) inv.pol = 'RG';
+                                });
+                            }
+                            localStorage.setItem('stowagePlanData', JSON.stringify(parsed));
+                            alert('Plano importado com sucesso!');
+                            location.reload();
+                        } else {
+                            alert('Arquivo JSON inválido.');
+                        }
+                    } catch(err) {
+                        alert('Erro ao ler o arquivo JSON.');
+                    }
+                };
+                reader.readAsText(file);
+            });
+        }
+
+        // --- SISTEMA DE AUTO-STOW INTELIGENTE (PÊNDULO, LIFO, GRAVIDADE) ---
+        function setupAutoStow() {
+            document.getElementById('btnAutoStow').addEventListener('click', () => {
+                if(!confirm("Isso aplicará as regras de Pêndulo Simétrico, LIFO, IMO, Reefer, OW e Top-Only. As cargas antigas serão reescritas. Continuar?")) return;
+
+                // 1. Limpeza
+                for(let bay in savedShip) { savedShip[bay] = {}; }
+                globalInventory.forEach(i => i.placed = 0);
+
+                // 2. Tabela de Pesos LIFO (Descarga descrescente, Carga crescente)
+                const podWeight = { TR: 6, VE: 5, NA: 4, BA: 3, LH: 2, LB: 1 };
+                const polWeight = { RG: 1, PG: 2, ST: 3, RJ: 4, SU: 5, PE: 6 };
+
+                // 3. Ordenação rigorosa LIFO
+                let sortedInventory = [...globalInventory].sort((a,b) => {
+                    let podDiff = (podWeight[b.pod] || 0) - (podWeight[a.pod] || 0);
+                    if (podDiff !== 0) return podDiff; 
+                    return (polWeight[a.pol] || 0) - (polWeight[b.pol] || 0); 
+                });
+
+                // 4. Divisão de Categorias
+                let imos = sortedInventory.filter(i => i.base === 'imo' || i.mods.includes('imo5') || i.mods.includes('imo8'));
+                let reefers = sortedInventory.filter(i => !imos.includes(i) && (i.base === 'reefer' || i.mods.includes('reefer')));
+                let standards = sortedInventory.filter(i => !imos.includes(i) && !reefers.includes(i));
+
+                let imoPairs = [['01 IMO','03 IMO'], ['05 IMO','07 IMO']];
+                let reeferPairs = [['17 REEFER','19 REEFER'], ['33 REEFER','35 REEFER'], ['37 REEFER','39 REEFER']];
+                let stdPairs = [['01','03'], ['05','07'], ['09','11'], ['13','15'], ['17','19'], ['21','23'], ['25','27'], ['33','35'], ['37','39']];
+
+                // 5. Função de Sorteio com Pêndulo Espelhado (Anti-Banda)
+                function getPendulum(cols) {
+                    let pairs = []; let center = null;
+                    cols.forEach(c => {
+                        if(c === '00') center = c;
+                        else if(parseInt(c) % 2 === 0) {
+                            let odd = String(parseInt(c)-1).padStart(2,'0');
+                            if(cols.includes(odd)) pairs.push([c, odd]);
+                            else pairs.push([c]);
+                        }
+                    });
+                    cols.forEach(c => {
+                        if(c !== '00' && parseInt(c) % 2 !== 0) {
+                            let even = String(parseInt(c)+1).padStart(2,'0');
+                            if(!cols.includes(even)) pairs.push([c]);
+                        }
+                    });
+                    pairs.sort(() => Math.random() - 0.5); // Embaralha as colunas
+                    let res = [];
+                    pairs.forEach(p => {
+                        if(p.length === 2 && Math.random() > 0.5) res.push(p[1], p[0]); // Randomiza qual bordo ataca primeiro
+                        else res.push(...p);
+                    });
+                    if(center) res.push(center);
+                    return res;
+                }
+
+                // Auxiliares de Restrição
+                function getAdjRolls(r) {
+                    if(r === '00') return ['01', '02'];
+                    if(r === '01') return ['00', '03'];
+                    if(r === '02') return ['00', '04'];
+                    let v = parseInt(r);
+                    return [String(v-2).padStart(2,'0'), String(v+2).padStart(2,'0')];
+                }
+
+                function getTiersAbove(grid, tier) {
+                    let all = [...grid.rowsBelow.slice().reverse(), ...grid.rowsAbove.slice().reverse()];
+                    let idx = all.indexOf(tier);
+                    return idx === -1 ? [] : all.slice(idx + 1);
+                }
+
+                // 6. O Motor Central
+                function allocate(items, pairsAllowed, preferDeck) {
+                    let pAllowed = [...pairsAllowed].sort(() => Math.random() - 0.5); // Sorteia o ponto de início ao longo do navio
+
+                    items.forEach(inv => {
+                        let remaining = inv.qty - inv.placed;
+                        if(remaining <= 0) return;
+
+                        let is40 = (inv.size === '40' || inv.size === '45' || inv.mods.includes('ol'));
+                        let isOW = inv.mods.includes('ow');
+                        let isOpenTop = (inv.base === 'opentop' || inv.mods.includes('oh'));
+
+                        for(let pair of pAllowed) {
+                            if(remaining <= 0) break;
+                            let b1 = pair[0]; let b2 = pair[1];
+                            let grid = bayGrids[b1];
+                            if(!grid || !shipTopology[b1] || !shipTopology[b2]) continue;
+
+                            // Respeito sagrado à Gravidade
+                            let deckTiers = grid.rowsAbove.slice().reverse();
+                            let holdTiers = grid.rowsBelow.slice().reverse();
+                            let tiers = preferDeck ? [...deckTiers, ...holdTiers] : [...holdTiers, ...deckTiers];
+
+                            for (let t of tiers) {
+                                if(remaining <= 0) break;
+                                let pCols = getPendulum(grid.cols); // Pêndulo aplicado a cada tier
+
+                                for(let c of pCols) {
+                                    if(remaining <= 0) break;
+                                    let coord = `${t}-${c}`;
+
+                                    // Verifica Topologia base e se já foi alocado/bloqueado
+                                    if (shipTopology[b1][coord] !== false || savedShip[b1][coord]) continue;
+                                    if (is40 && (shipTopology[b2][coord] !== false || savedShip[b2][coord])) continue;
+
+                                    // Regra OW: Vizinhos não podem ter carga real alocada neles
+                                    if (isOW) {
+                                        let adjs = getAdjRolls(c);
+                                        let owBlocked = false;
+                                        for(let a of adjs) {
+                                            if (shipTopology[b1][`${t}-${a}`] === false && savedShip[b1][`${t}-${a}`] && savedShip[b1][`${t}-${a}`].invId) owBlocked = true;
+                                            if (is40 && shipTopology[b2][`${t}-${a}`] === false && savedShip[b2][`${t}-${a}`] && savedShip[b2][`${t}-${a}`].invId) owBlocked = true;
+                                        }
+                                        if(owBlocked) continue;
+                                    }
+
+                                    // Alocação Final
+                                    savedShip[b1][coord] = { invId: inv.id };
+                                    if (is40) savedShip[b2][coord] = { base: 'blocked40' }; // Tranca irmão longitudinal
+
+                                    // OW joga uma trava invisível nos vizinhos imediatos para prever que ninguém aloque ali depois
+                                    if (isOW) {
+                                        let adjs = getAdjRolls(c);
+                                        adjs.forEach(a => {
+                                            if(shipTopology[b1][`${t}-${a}`] === false && !savedShip[b1][`${t}-${a}`]) savedShip[b1][`${t}-${a}`] = { base: 'blocked_ow' };
+                                            if(is40 && shipTopology[b2][`${t}-${a}`] === false && !savedShip[b2][`${t}-${a}`]) savedShip[b2][`${t}-${a}`] = { base: 'blocked_ow' };
+                                        });
+                                    }
+
+                                    // Open Top trava todos os andares de cima (ninguém vai pisar nele nas varreduras seguintes)
+                                    if (isOpenTop) {
+                                        let above = getTiersAbove(grid, t);
+                                        above.forEach(at => {
+                                            if(shipTopology[b1][`${at}-${c}`] === false && !savedShip[b1][`${at}-${c}`]) savedShip[b1][`${at}-${c}`] = { base: 'blocked_ot' };
+                                            if(is40 && shipTopology[b2][`${at}-${c}`] === false && !savedShip[b2][`${at}-${c}`]) savedShip[b2][`${at}-${c}`] = { base: 'blocked_ot' };
+                                        });
+                                    }
+
+                                    inv.placed++;
+                                    remaining--;
+                                }
+                            }
+                        }
+                    });
+                }
+
+                allocate(imos, imoPairs, false);
+                allocate(reefers, reeferPairs, true);
+                allocate(standards, stdPairs, false);
+
+                recalculateInventory();
+                renderBayPairsUI();
+                persistData();
+                
+                let faltantes = globalInventory.filter(i => (i.qty - i.placed) > 0);
+                if(faltantes.length > 0) {
+                    alert(`Auto-Stow concluído. Faltaram ${faltantes.length} lote(s) que não couberam dentro das restrições de geometria atuais.`);
+                } else {
+                    alert("✅ Plano perfeitamente estivado! (Simétrico, LIFO, com restrições IMO/Reefer/OW/OT).");
+                }
+            });
+        }
+
+        // --- 3. INICIALIZAÇÃO DA TOPOLOGIA PERFEITA ---
+        function isCellHiddenDefault(bayId, row, col) {
+            const b = parseInt(bayId); 
+            const rIdxA = ROWS_ABOVE_DEFAULT.indexOf(row);
+            const isAbove = rIdxA !== -1;
+            
+            if (b === 1 || b === 3) {
+                if (isAbove) {
+                    if (row !== '84' && row !== '82') return true;
+                    if (col === '12' || col === '11' || col === '00') return true;
+                    return false;
+                } else {
+                    if (col === '00' || col === '12' || col === '11' || col === '10' || col === '09' || col === '08' || col === '07') return true;
+                    if (row === '14' || row === '12') return false; 
+                    if (row === '10' || row === '08') {
+                        if (col === '06' || col === '05') return true;
+                        return false;
+                    }
+                    if (row === '06' || row === '04' || row === '02') {
+                        if (col === '06' || col === '05' || col === '04' || col === '03') return true;
+                        return false;
+                    }
+                    return true;
+                }
+            }
+
+            if (b === 5 || b === 7) {
+                if (isAbove) {
+                    if (row === '92' || row === '90') return true;
+                    return false;
+                } else {
+                    if (row === '02') return true;
+                    if (col === '12' || col === '11' || col === '10' || col === '09') return true;
+                    if (row === '14' || row === '12') return false; 
+                    if (col === '08' || col === '06' || col === '05' || col === '07') return true;
+                    return false;
+                }
+            }
+
+            if (b >= 9 && b <= 15) {
+                if (isAbove) {
+                    if (row === '92' || row === '90') return true;
+                    return false;
+                } else {
+                    if (col === '00' || col === '12' || col === '11') return true;
+                    return false;
+                }
+            }
+
+            if (b === 17 || b === 19) {
+                if (isAbove) {
+                    if (row === '92') return true;
+                    if ((row === '90' || row === '88' || row === '86') && col === '00') return true;
+                    return false;
+                } else {
+                    if (col === '00' || col === '12' || col === '11') return true;
+                    return false;
+                }
+            }
+
+            if ((b >= 21 && b <= 27) || b === 33 || b === 35) {
+                if (isAbove) {
+                    if (row === '92') return true;
+                    return false;
+                } else {
+                    if (col === '00' || col === '12' || col === '11') return true;
+                    return false;
+                }
+            }
+
+            if (b === 37 || b === 39) {
+                if (isAbove) return false;
+                else return true;
+            }
+
+            if (col === '00' && !isAbove) return true;
+            return false;
+        }
+
+        function renameAxis(bayId, type, oldVal, el) {
+            let newVal = el.innerText.replace(/[\n\r]/g, '').trim();
+            if (!newVal || newVal === oldVal) {
+                el.innerText = oldVal;
+                return;
+            }
+
+            let grid = bayGrids[bayId];
+            if (type === 'col') {
+                let idx = grid.cols.indexOf(oldVal);
+                if (idx !== -1) grid.cols[idx] = newVal;
+            } else if (type === 'row-above') {
+                let idx = grid.rowsAbove.indexOf(oldVal);
+                if (idx !== -1) grid.rowsAbove[idx] = newVal;
+            } else if (type === 'row-below') {
+                let idx = grid.rowsBelow.indexOf(oldVal);
+                if (idx !== -1) grid.rowsBelow[idx] = newVal;
+            }
+
+            let newTopology = {};
+            let newSavedShip = {};
+            
+            Object.keys(shipTopology[bayId]).forEach(coord => {
+                let [r, c] = coord.split('-');
+                let newR = (type.includes('row') && r === oldVal) ? newVal : r;
+                let newC = (type === 'col' && c === oldVal) ? newVal : c;
+                newTopology[`${newR}-${newC}`] = shipTopology[bayId][coord];
+            });
+
+            Object.keys(savedShip[bayId]).forEach(coord => {
+                let [r, c] = coord.split('-');
+                let newR = (type.includes('row') && r === oldVal) ? newVal : r;
+                let newC = (type === 'col' && c === oldVal) ? newVal : c;
+                newSavedShip[`${newR}-${newC}`] = savedShip[bayId][coord];
+            });
+
+            shipTopology[bayId] = newTopology;
+            savedShip[bayId] = newSavedShip;
+            
+            persistData();
+            renderBayPairsUI();
+        }
+
+        function setupGridEditControls() {
+            document.getElementById('btnToggleRoll00').addEventListener('click', () => {
+                let bayId = document.getElementById('editGridBaySelect').value;
+                let grid = bayGrids[bayId];
+
+                if (grid.cols.includes('00')) {
+                    grid.cols = grid.cols.filter(c => c !== '00');
+                } else {
+                    let insertIndex = grid.cols.findIndex(c => parseInt(c) % 2 !== 0);
+                    if (insertIndex === -1) {
+                        grid.cols.push('00');
+                    } else {
+                        grid.cols.splice(insertIndex, 0, '00');
+                    }
+                    
+                    let all_rows = [...grid.rowsAbove, ...grid.rowsBelow];
+                    all_rows.forEach(r => {
+                        if (shipTopology[bayId][`${r}-00`] === undefined) {
+                            shipTopology[bayId][`${r}-00`] = false;
+                        }
+                    });
+                }
+                persistData(); 
+                renderBayPairsUI();
+            });
+
+            document.getElementById('btnAddRoll').addEventListener('click', () => {
+                let bayId = document.getElementById('editGridBaySelect').value;
+                let grid = bayGrids[bayId];
+                let evens = grid.cols.filter(c => parseInt(c) % 2 === 0 && c !== '00').map(c => parseInt(c));
+                let nextEven = evens.length > 0 ? Math.max(...evens) + 2 : 2;
+                let odds = grid.cols.filter(c => parseInt(c) % 2 !== 0).map(c => parseInt(c));
+                let nextOdd = odds.length > 0 ? Math.max(...odds) + 2 : 1;
+                
+                grid.cols.unshift(String(nextEven).padStart(2, '0'));
+                grid.cols.push(String(nextOdd).padStart(2, '0'));
+                
+                let all_rows = [...grid.rowsAbove, ...grid.rowsBelow];
+                all_rows.forEach(r => {
+                    shipTopology[bayId][`${r}-${String(nextEven).padStart(2,'0')}`] = false;
+                    shipTopology[bayId][`${r}-${String(nextOdd).padStart(2,'0')}`] = false;
+                });
+                persistData(); renderBayPairsUI();
+            });
+
+            document.getElementById('btnRemRoll').addEventListener('click', () => {
+                let bayId = document.getElementById('editGridBaySelect').value;
+                let grid = bayGrids[bayId];
+                if(grid.cols.length <= 1) return;
+                grid.cols.shift(); grid.cols.pop();
+                persistData(); renderBayPairsUI();
+            });
+
+            document.getElementById('btnAddTierAbove').addEventListener('click', () => {
+                let bayId = document.getElementById('editGridBaySelect').value;
+                let grid = bayGrids[bayId];
+                let max = grid.rowsAbove.length > 0 ? Math.max(...grid.rowsAbove.map(r => parseInt(r))) : 80;
+                let next = max + 2;
+                grid.rowsAbove.unshift(String(next).padStart(2, '0'));
+                
+                grid.cols.forEach(c => {
+                    shipTopology[bayId][`${String(next).padStart(2, '0')}-${c}`] = false;
+                });
+                persistData(); renderBayPairsUI();
+            });
+
+            document.getElementById('btnRemTierAbove').addEventListener('click', () => {
+                let bayId = document.getElementById('editGridBaySelect').value;
+                let grid = bayGrids[bayId];
+                if(grid.rowsAbove.length === 0) return;
+                grid.rowsAbove.shift();
+                persistData(); renderBayPairsUI();
+            });
+
+            document.getElementById('btnAddTierBelow').addEventListener('click', () => {
+                let bayId = document.getElementById('editGridBaySelect').value;
+                let grid = bayGrids[bayId];
+                let max = grid.rowsBelow.length > 0 ? Math.max(...grid.rowsBelow.map(r => parseInt(r))) : 0;
+                let next = max + 2;
+                grid.rowsBelow.unshift(String(next).padStart(2, '0'));
+                
+                grid.cols.forEach(c => {
+                    shipTopology[bayId][`${String(next).padStart(2, '0')}-${c}`] = false;
+                });
+                persistData(); renderBayPairsUI();
+            });
+
+            document.getElementById('btnRemTierBelow').addEventListener('click', () => {
+                let bayId = document.getElementById('editGridBaySelect').value;
+                let grid = bayGrids[bayId];
+                if(grid.rowsBelow.length === 0) return;
+                grid.rowsBelow.shift(); 
+                persistData(); renderBayPairsUI();
+            });
+        }
+
+        function initApp() {
+            document.getElementById('closeModalBtn').addEventListener('click', () => {
+                document.getElementById('welcomeModal').style.display = 'none';
+            });
+            document.getElementById('btnResetData').addEventListener('click', resetLocalData);
+
+            if (!loadPersistedData()) {
+                BAY_PAIRS.forEach(pair => {
+                    pair.forEach(b => {
+                        bayGrids[b] = { cols: [...COLS_DEFAULT], rowsAbove: [...ROWS_ABOVE_DEFAULT], rowsBelow: [...ROWS_BELOW_DEFAULT] };
+                        shipTopology[b] = {};
+                        savedShip[b] = {};
+                        let allR = [...ROWS_ABOVE_DEFAULT, ...ROWS_BELOW_DEFAULT];
+                        allR.forEach(r => {
+                            COLS_DEFAULT.forEach(c => {
+                                shipTopology[b][`${r}-${c}`] = isCellHiddenDefault(b, r, c);
+                            });
+                        });
+                    });
+                });
+                load2026Data();
+            } else {
+                document.getElementById('cargoTbody').innerHTML = '';
+                globalInventory.forEach(item => addCargoRow(item));
+            }
+
+            ['lb', 'lh', 'ba', 'na', 've', 'tr'].forEach(port => {
+                const input = document.getElementById('color-' + port);
+                if(input) {
+                    input.addEventListener('input', (e) => {
+                        document.documentElement.style.setProperty(`--port-${port}`, e.target.value);
+                    });
+                }
+            });
+
+            document.getElementById('tabCargo').addEventListener('click', () => switchTab('cargo'));
+            document.getElementById('tabManual').addEventListener('click', () => switchTab('manual'));
+            document.getElementById('addCargoRowBtn').addEventListener('click', () => addCargoRow());
+
+            const baySelect = document.getElementById('baySelect');
+            BAY_PAIRS.forEach((pair, idx) => {
+                let opt = document.createElement('option');
+                opt.value = idx; 
+                opt.innerText = `Bays ${pair[0]} & ${pair[1]}`;
+                baySelect.appendChild(opt);
+            });
+            
+            baySelect.addEventListener('change', (e) => {
+                currentPairIdx = parseInt(e.target.value);
+                lastClickedCell = null;
+                renderBayPairsUI();
+            });
+
+            document.getElementById('btnDeselect').addEventListener('click', () => {
+                activeInvId = null;
+                renderInventoryPalette();
+            });
+
+            document.getElementById('toggleEditBtn').addEventListener('click', function() {
+                currentState.editMode = !currentState.editMode;
+                this.classList.toggle('active');
+                document.getElementById('canvasArea').classList.toggle('edit-mode-active');
+                document.getElementById('gridEditPanel').style.display = currentState.editMode ? 'block' : 'none';
+                lastClickedCell = null;
+                renderBayPairsUI(); 
+            });
+
+            document.getElementById('btnFilterIMO').addEventListener('click', function() {
+                this.classList.toggle('active');
+                document.getElementById('canvasArea').classList.toggle('filter-imo');
+            });
+            
+            document.getElementById('btnFilterReefer').addEventListener('click', function() {
+                this.classList.toggle('active');
+                document.getElementById('canvasArea').classList.toggle('filter-reefer');
+            });
+
+            document.getElementById('exportPdfBtn').addEventListener('click', generateRealPdf);
+
+            setupGridEditControls();
+            setupJsonExportImport();
+            setupAutoStow();
+            syncInventoryFromTable();
+            
+            if(localStorage.getItem('stowagePlanData') === null) {
+                document.getElementById('welcomeModal').style.display = 'flex';
+            } else {
+                document.getElementById('welcomeModal').style.display = 'none';
+            }
+        }
+
+        function getSiblingBay(bayId) {
+            let pair = BAY_PAIRS[currentPairIdx];
+            if (pair[0] === bayId) return pair[1];
+            if (pair[1] === bayId) return pair[0];
+            return null;
+        }
+
+        function switchTab(tab) {
+            document.getElementById('tabCargo').classList.remove('active');
+            document.getElementById('tabManual').classList.remove('active');
+            document.getElementById('cargoView').style.display = 'none';
+            document.getElementById('manualView').style.display = 'none';
+
+            if(tab === 'cargo') {
+                document.getElementById('tabCargo').classList.add('active');
+                document.getElementById('cargoView').style.display = 'flex';
+                document.getElementById('toggleEditBtn').style.display = 'none';
+            } else {
+                document.getElementById('tabManual').classList.add('active');
+                document.getElementById('manualView').style.display = 'flex';
+                document.getElementById('toggleEditBtn').style.display = 'block';
+                syncInventoryFromTable(); 
+                renderBayPairsUI();
+            }
+        }
+
+        // --- 4. FUNÇÕES DA TABELA DE CARGA ---
+        function generateId() {
+            return 'inv_' + Math.random().toString(36).substr(2, 9);
+        }
+
+        function addCargoRow(data = null) {
+            let tr = document.createElement('tr');
+            let id = data && data.id ? data.id : generateId();
+            tr.setAttribute('data-id', id);
+
+            let d_pol = data && data.pol ? data.pol : 'RG';
+            let d_pod = data && data.pod ? data.pod : 'TR';
+            let d_qty = data && data.qty ? data.qty : 10;
+            let d_size = data && data.size ? data.size : '20';
+            let d_base = data && data.base ? data.base : 'dry';
+            let d_mods = data && data.mods ? data.mods : [];
+
+            const isChecked = (val) => d_mods.includes(val) ? 'checked' : '';
+
+            tr.innerHTML = `
+                <td><select class="inp-pol" onchange="syncInventoryFromTable()">
+                    <option value="RG" ${d_pol==='RG'?'selected':''}>RG</option>
+                    <option value="PG" ${d_pol==='PG'?'selected':''}>PG</option>
+                    <option value="ST" ${d_pol==='ST'?'selected':''}>ST</option>
+                    <option value="RJ" ${d_pol==='RJ'?'selected':''}>RJ</option>
+                    <option value="SU" ${d_pol==='SU'?'selected':''}>SU</option>
+                    <option value="PE" ${d_pol==='PE'?'selected':''}>PE</option>
+                </select></td>
+                <td><select class="inp-pod" onchange="syncInventoryFromTable()">
+                    <option value="LB" ${d_pod==='LB'?'selected':''}>LB</option>
+                    <option value="LH" ${d_pod==='LH'?'selected':''}>LH</option>
+                    <option value="BA" ${d_pod==='BA'?'selected':''}>BA</option>
+                    <option value="NA" ${d_pod==='NA'?'selected':''}>NA</option>
+                    <option value="VE" ${d_pod==='VE'?'selected':''}>VE</option>
+                    <option value="TR" ${d_pod==='TR'?'selected':''}>TR</option>
+                </select></td>
+                <td><input type="number" class="inp-qty" value="${d_qty}" min="1" onchange="syncInventoryFromTable()"></td>
+                <td><select class="inp-size" onchange="syncInventoryFromTable()">
+                    <option value="20" ${d_size==='20'?'selected':''}>20'</option>
+                    <option value="40" ${d_size==='40'?'selected':''}>40'</option>
+                    <option value="45" ${d_size==='45'?'selected':''}>45'</option>
+                </select></td>
+                <td><select class="inp-base" onchange="syncInventoryFromTable()">
+                    <option value="dry" ${d_base==='dry'?'selected':''}>Dry Cargo</option>
+                    <option value="opentop" ${d_base==='opentop'?'selected':''}>Open Top</option>
+                    <option value="flatrack" ${d_base==='flatrack'?'selected':''}>Flat Rack</option>
+                    <option value="platform" ${d_base==='platform'?'selected':''}>Plataforma</option>
+                    <option value="oh40" ${d_base==='oh40'?'selected':''}>Over Hang 40'</option>
+                    <option value="oh45" ${d_base==='oh45'?'selected':''}>Over Hang 45'</option>
+                    <option value="imo" ${d_base==='imo'?'selected':''}>IMO Class</option>
+                    <option value="livestock" ${d_base==='livestock'?'selected':''}>Live Stock</option>
+                    <option value="tank" ${d_base==='tank'?'selected':''}>Tank</option>
+                </select></td>
+                <td><div class="attr-checks" onchange="syncInventoryFromTable()">
+                    <label><input type="checkbox" value="hc" ${isChecked('hc')}>HC</label>
+                    <label><input type="checkbox" value="ow" ${isChecked('ow')}>OW</label>
+                    <label><input type="checkbox" value="oh" ${isChecked('oh')}>OH</label>
+                    <label><input type="checkbox" value="ol" ${isChecked('ol')}>OL</label>
+                    <label><input type="checkbox" value="empty" ${isChecked('empty')}>Empty (E)</label>
+                    <label><input type="checkbox" value="reefer" ${isChecked('reefer')}>Reefer (R)</label>
+                    <label><input type="checkbox" value="imo5" ${isChecked('imo5')}>IMO 5</label>
+                    <label><input type="checkbox" value="imo8" ${isChecked('imo8')}>IMO 8</label>
+                </div></td>
+                <td><button class="btn-clear-row" onclick="this.closest('tr').remove(); syncInventoryFromTable();">X</button></td>
+            `;
+            document.getElementById('cargoTbody').appendChild(tr);
+        }
+
+        function load2026Data() {
+            document.getElementById('cargoTbody').innerHTML = '';
+            cargoData2026.forEach(item => {
+                item.id = generateId(); 
+                addCargoRow(item);
+            });
+            syncInventoryFromTable();
+        }
+
+        function syncInventoryFromTable() {
+            let oldInventory = [...globalInventory];
+            globalInventory = [];
+            
+            document.querySelectorAll('#cargoTbody tr').forEach(row => {
+                let id = row.getAttribute('data-id');
+                let pol = row.querySelector('.inp-pol').value;
+                let pod = row.querySelector('.inp-pod').value;
+                let qty = parseInt(row.querySelector('.inp-qty').value) || 0;
+                let size = row.querySelector('.inp-size').value;
+                let base = row.querySelector('.inp-base').value;
+                let mods = [];
+                row.querySelectorAll('.attr-checks input:checked').forEach(cb => mods.push(cb.value));
+
+                let oldItem = oldInventory.find(i => i.id === id);
+                let placed = oldItem ? oldItem.placed : 0; 
+
+                globalInventory.push({ id, pol, pod, qty, size, base, mods, placed });
+            });
+            recalculateInventory(); 
+            persistData();
+        }
+
+        // --- 5. PALETA LATERAL ---
+        function renderInventoryPalette() {
+            const list = document.getElementById('inventoryList');
+            list.innerHTML = '';
+            
+            globalInventory.forEach(inv => {
+                let remaining = inv.qty - inv.placed;
+                let isComplete = remaining <= 0;
+                let isActive = activeInvId === inv.id;
+                
+                let bgColor = `var(--port-${inv.pod.toLowerCase()})`;
+                let layersHtml = '';
+                if(inv.base && inv.base !== 'dry') layersHtml += `<div class="layer base-${inv.base}"></div>`;
+                inv.mods.forEach(m => layersHtml += `<div class="layer mod-${m}"></div>`);
+
+                let el = document.createElement('div');
+                el.className = `palette-item ${isActive ? 'active' : ''} ${isComplete ? 'complete' : ''}`;
+                
+                el.onclick = () => {
+                    if (!isComplete) {
+                        activeInvId = inv.id;
+                        renderInventoryPalette();
+                    } else if (isComplete && isActive) {
+                        activeInvId = null;
+                        renderInventoryPalette();
+                    }
+                };
+                
+                el.innerHTML = `
+                    <div class="palette-cell" style="background-color: ${bgColor};">
+                        <span class="palette-port" style="color: ${inv.base==='oh40' ? '#111' : '#000'}">${inv.pod}</span>
+                        ${layersHtml}
+                    </div>
+                    <div class="palette-info">
+                        <div class="palette-title">${inv.size}' ${inv.base.toUpperCase()}</div>
+                        <div class="palette-mods">${inv.pol} > ${inv.pod} | ${inv.mods.length ? inv.mods.join(', ').toUpperCase() : 'STD'}</div>
+                    </div>
+                    <div class="palette-counter ${isComplete ? 'zero' : ''}">
+                        ${remaining}
+                    </div>
+                `;
+                list.appendChild(el);
+            });
+            
+            let actItem = globalInventory.find(i => i.id === activeInvId);
+            if (actItem && (actItem.qty - actItem.placed) <= 0) {
+                activeInvId = null;
+                setTimeout(renderInventoryPalette, 10);
+            }
+        }
+
+        function recalculateInventory() {
+            globalInventory.forEach(inv => inv.placed = 0);
+            for (let bay in savedShip) {
+                for (let coord in savedShip[bay]) {
+                    let cell = savedShip[bay][coord];
+                    if (cell.invId !== undefined) {
+                        let inv = globalInventory.find(i => i.id === cell.invId);
+                        if(inv) inv.placed++;
+                        else delete savedShip[bay][coord]; 
+                    }
+                }
+            }
+            renderInventoryPalette();
+            persistData();
+        }
+
+        // --- 6. RENDERIZAÇÃO DAS BAYS ---
+        function getPortColorHex(portCode) {
+            let input = document.getElementById('color-' + portCode.toLowerCase());
+            return input ? input.value : '#ffffff';
+        }
+
+        function generatePairHtml(bay1, bay2, isPrint = false) {
+            let html = `
+            <div class="bay-pair-wrapper">
+                <div class="pair-container">
+                    ${generateBayGridHtml(bay1, isPrint)}
+                    ${generateBayGridHtml(bay2, isPrint)}
+                </div>
+            </div>
+            `;
+            return html;
+        }
+
+        function generateBayGridHtml(bayId, isPrint = false) {
+            let savedData = savedShip[bayId] || {};
+            let isEditable = currentState.editMode && !isPrint;
+            let bayGrid = bayGrids[bayId];
+            
+            let bayHtml = `
+            <div class="bay-container-wrapper" style="display: flex; flex-direction: column; align-items: center;">
+                <h3 style="font-size: 24px; color: #111; margin: 0 0 10px 0; letter-spacing: 1px;">BAY ${bayId}</h3>
+                <div class="bay-container">
+                    <div class="axis-title">ROLL</div>
+            `;
+            
+            // --- ESTRUTURA INVISÍVEL PARA ALINHAMENTO MATEMÁTICO PERFEITO (TOPO) ---
+            let colLabels = `<div class="axis-row" style="margin-bottom: 4px; margin-top: 4px;">`;
+            colLabels += `<div class="row-label" style="visibility: hidden; border: none; pointer-events: none;">00</div>`;
+            colLabels += `<div class="grid-row">`;
+            bayGrid.cols.forEach(c => {
+                colLabels += `<div class="axis-label" contenteditable="${isEditable ? 'true' : 'false'}" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" onblur="renameAxis('${bayId}', 'col', '${c}', this)">${c}</div>`;
+            });
+            colLabels += '</div></div>';
+            
+            bayHtml += colLabels;
+
+            bayHtml += `<div class="bay-grid-flex"><div class="axis-title-tier">TIER</div><div>`;
+
+            const drawRows = (rowsArray, typeStr) => {
+                let section = '';
+                rowsArray.forEach(row => {
+                    let rowHtml = `<div class="axis-row"><div class="row-label" contenteditable="${isEditable ? 'true' : 'false'}" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" onblur="renameAxis('${bayId}', '${typeStr}', '${row}', this)">${row}</div><div class="grid-row">`;
+                    bayGrid.cols.forEach(col => {
+                        let coord = `${row}-${col}`;
+                        let isHidden = shipTopology[bayId][coord] ? 'hidden' : '';
+                        let cellData = savedData[coord];
+                        
+                        let contentHtml = '';
+                        let bgColorStyle = isPrint ? 'background-color: #ffffff !important;' : 'background-color: var(--port-empty);';
+
+                        if (cellData) {
+                            if (cellData.base === 'blocked40') {
+                                contentHtml = `<div class="layer base-blocked40"></div>`;
+                            } else if (cellData.base === 'blocked_ow' || cellData.base === 'blocked_ot') {
+                                bgColorStyle = isPrint ? 'background-color: #ffffff !important;' : 'background-color: var(--port-empty);';
+                            } else if (cellData.invId !== undefined) {
+                                let inv = globalInventory.find(i => i.id === cellData.invId);
+                                if(inv) {
+                                    let actualHex = getPortColorHex(inv.pod);
+                                    bgColorStyle = isPrint ? `background-color: ${actualHex} !important;` : `background-color: var(--port-${inv.pod.toLowerCase()});`;
+                                    
+                                    contentHtml += `<span class="port-text" style="color: ${inv.base==='oh40' ? '#111' : '#000'}">${inv.pod.toUpperCase()}</span>`;
+                                    if(inv.base && inv.base !== 'dry') contentHtml += `<div class="layer base-${inv.base}"></div>`;
+                                    inv.mods.forEach(m => contentHtml += `<div class="layer mod-${m}"></div>`);
+                                }
+                            }
+                        }
+
+                        let attrs = !isPrint ? `data-coord="${coord}" data-row="${row}" data-col="${col}" data-bay="${bayId}"` : '';
+                        rowHtml += `<div class="cell ${isHidden}" ${attrs} style="${bgColorStyle}">${contentHtml}</div>`;
+                    });
+                    rowHtml += `</div></div>`;
+                    section += rowHtml;
+                });
+                return section;
+            };
+
+            bayHtml += drawRows(bayGrid.rowsAbove, 'row-above');
+            bayHtml += `<div class="deck-separator"></div>`;
+            bayHtml += drawRows(bayGrid.rowsBelow, 'row-below');
+            
+            // --- ESTRUTURA INVISÍVEL PARA ALINHAMENTO MATEMÁTICO PERFEITO (FUNDO) ---
+            let colFooter = `<div class="axis-row" style="margin-bottom: 4px; margin-top: 4px;">`;
+            colFooter += `<div class="row-label" style="visibility: hidden; border: none; pointer-events: none;">00</div>`;
+            colFooter += `<div class="grid-row">`;
+            bayGrid.cols.forEach(c => {
+                colFooter += `<div class="axis-label" contenteditable="${isEditable ? 'true' : 'false'}" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" onblur="renameAxis('${bayId}', 'col', '${c}', this)">${c}</div>`;
+            });
+            colFooter += '</div></div>';
+            
+            bayHtml += `</div></div>`; 
+            bayHtml += colFooter;
+            bayHtml += `</div></div>`; 
+            
+            return bayHtml;
+        }
+
+        function renderBayPairsUI() {
+            const pair = BAY_PAIRS[currentPairIdx];
+            const container = document.getElementById('pairContainer');
+            
+            const editSelect = document.getElementById('editGridBaySelect');
+            if(editSelect) {
+                const currentEditVal = editSelect.value;
+                editSelect.innerHTML = `<option value="${pair[0]}">Editar Bay ${pair[0]}</option><option value="${pair[1]}">Editar Bay ${pair[1]}</option>`;
+                if (pair.includes(currentEditVal)) editSelect.value = currentEditVal;
+            }
+
+            container.innerHTML = generatePairHtml(pair[0], pair[1], false);
+            attachCellListeners();
+        }
+
+        // --- EXPORTAR PDF ---
+        async function generateRealPdf() {
+            const loadingOverlay = document.getElementById('pdfLoadingOverlay');
+            const printArea = document.getElementById('printArea');
+            const mainEl = document.querySelector('main');
+            const headerEl = document.querySelector('header');
+            
+            loadingOverlay.style.display = 'flex';
+            printArea.innerHTML = ''; 
+            
+            let fullHtml = '';
+            BAY_PAIRS.forEach(pair => {
+                fullHtml += `<div class="pdf-page">`;
+                fullHtml += generatePairHtml(pair[0], pair[1], true);
+                fullHtml += `</div>`;
+            });
+            
+            printArea.innerHTML = fullHtml;
+
+            headerEl.style.display = 'none';
+            mainEl.style.display = 'none';
+            printArea.style.display = 'block';
+
+            await new Promise(r => setTimeout(r, 500));
+
+            const opt = {
+                margin:       0,
+                filename:     'BayPlan_Azimuth_2026.pdf',
+                image:        { type: 'jpeg', quality: 1 },
+                html2canvas:  { scale: 2, useCORS: true, backgroundColor: '#ffffff', scrollY: 0, windowWidth: document.documentElement.offsetWidth },
+                jsPDF:        { unit: 'mm', format: 'a4', orientation: 'landscape' }
+            };
+
+            try {
+                await html2pdf().set(opt).from(printArea).save();
+            } catch(e) {
+                alert("Houve um erro ao gerar o PDF. " + e);
+            }
+
+            printArea.style.display = 'none';
+            printArea.innerHTML = ''; 
+            headerEl.style.display = 'flex';
+            mainEl.style.display = 'flex';
+            loadingOverlay.style.display = 'none';
+        }
+
+        // --- 7. LÓGICA DE CLIQUE E SHIFT ---
+        function removeContainer(bayId, rStr, cStr) {
+            let coord = `${rStr}-${cStr}`;
+            let existing = savedShip[bayId][coord];
+            if (!existing) return;
+            
+            if (existing.base === 'blocked40') {
+                let sibling = getSiblingBay(bayId);
+                if(sibling && savedShip[sibling][coord]) {
+                    delete savedShip[sibling][coord];
+                }
+                delete savedShip[bayId][coord];
+            } 
+            else if (existing.invId !== undefined) {
+                let inv = globalInventory.find(i => i.id === existing.invId);
+                if (inv && (inv.size === '40' || inv.size === '45' || inv.mods.includes('ol'))) {
+                    let sibling = getSiblingBay(bayId);
+                    if(sibling) delete savedShip[sibling][coord];
+                }
+                delete savedShip[bayId][coord];
+            }
+        }
+
+        function canPlaceContainer(inv, bayId, showAlert = true) {
+            let isImo = inv.base === 'imo' || inv.mods.includes('imo5') || inv.mods.includes('imo8');
+            let isReefer = inv.base === 'reefer' || inv.mods.includes('reefer');
+
+            let isImoBay = bayId.includes('IMO');
+            let isReeferBay = bayId.includes('REEFER');
+
+            if (isImo && !isImoBay) {
+                if (showAlert) alert("Contêineres IMO devem ser alocados nas plantas específicas de IMO (Ex: 01 IMO).");
+                return false;
+            }
+            if (isReefer && !isReeferBay) {
+                if (showAlert) alert("Contêineres Reefer devem ser alocados nas plantas específicas de REEFER (Ex: 17 REEFER).");
+                return false;
+            }
+            if (!isImo && isImoBay) {
+                if (showAlert) alert("Apenas contêineres IMO podem ser alocados nestas plantas de IMO.");
+                return false;
+            }
+            if (!isReefer && isReeferBay) {
+                if (showAlert) alert("Apenas contêineres Reefer podem ser alocados nestas plantas de REEFER.");
+                return false;
+            }
+            return true;
+        }
+
+        function placeContainer(bayId, rStr, cStr, showAlert = true) {
+            let coord = `${rStr}-${cStr}`;
+            if (shipTopology[bayId][coord]) return; 
+            if (savedShip[bayId][coord] && savedShip[bayId][coord].base !== 'blocked_ow' && savedShip[bayId][coord].base !== 'blocked_ot') return; 
+            
+            if (activeInvId !== null) {
+                let inv = globalInventory.find(i => i.id === activeInvId);
+                let remaining = inv.qty - inv.placed;
+                
+                if (remaining > 0) {
+                    if (!canPlaceContainer(inv, bayId, showAlert)) return;
+
+                    if (inv.size === '40' || inv.size === '45' || inv.mods.includes('ol')) {
+                        let sibling = getSiblingBay(bayId);
+                        if (!sibling || shipTopology[sibling][coord] || (savedShip[sibling][coord] && savedShip[sibling][coord].base !== 'blocked_ow' && savedShip[sibling][coord].base !== 'blocked_ot')) {
+                            return; 
+                        }
+                        savedShip[sibling][coord] = { base: 'blocked40' }; 
+                    }
+                    
+                    savedShip[bayId][coord] = { invId: inv.id };
+                    inv.placed++; 
+                }
+            }
+        }
+
+        function attachCellListeners() {
+            document.querySelectorAll('.cell').forEach(cell => {
+                cell.addEventListener('mousedown', function(e) {
+                    let rStr = this.getAttribute('data-row');
+                    let cStr = this.getAttribute('data-col');
+                    let bayId = this.getAttribute('data-bay');
+                    
+                    let grid = bayGrids[bayId];
+                    let all_rows = [...grid.rowsAbove, ...grid.rowsBelow];
+                    let rIdx = all_rows.indexOf(rStr);
+                    let cIdx = grid.cols.indexOf(cStr);
+
+                    if (e.shiftKey && activeInvId !== null && isShiftActionFill && !currentState.editMode) {
+                        let inv = globalInventory.find(i => i.id === activeInvId);
+                        if (inv && !canPlaceContainer(inv, bayId, true)) return;
+                    }
+
+                    if (e.shiftKey && lastClickedCell && lastClickedCell.bayId === bayId) {
+                        let minR = Math.min(rIdx, lastClickedCell.r);
+                        let maxR = Math.max(rIdx, lastClickedCell.r);
+                        let minC = Math.min(cIdx, lastClickedCell.c);
+                        let maxC = Math.max(cIdx, lastClickedCell.c);
+                        
+                        for(let r = minR; r <= maxR; r++) {
+                            for(let c = minC; c <= maxC; c++) {
+                                let targetCoord = `${all_rows[r]}-${grid.cols[c]}`;
+                                if(currentState.editMode) {
+                                     shipTopology[bayId][targetCoord] = isShiftActionFill;
+                                } else {
+                                     if(isShiftActionFill) placeContainer(bayId, all_rows[r], grid.cols[c], false);
+                                     else removeContainer(bayId, all_rows[r], grid.cols[c]);
+                                }
+                            }
+                        }
+                    } else {
+                        let coord = `${rStr}-${cStr}`;
+                        
+                        if(currentState.editMode) {
+                             shipTopology[bayId][coord] = !shipTopology[bayId][coord];
+                             isShiftActionFill = shipTopology[bayId][coord]; 
+                        } else {
+                             let existing = savedShip[bayId][coord];
+                             if(existing && (existing.invId !== undefined || existing.base === 'blocked40')) {
+                                 removeContainer(bayId, rStr, cStr);
+                                 isShiftActionFill = false; 
+                             } else {
+                                 placeContainer(bayId, rStr, cStr, true);
+                                 isShiftActionFill = true; 
+                             }
+                        }
+                        lastClickedCell = { r: rIdx, c: cIdx, bayId: bayId };
+                    }
+                    
+                    recalculateInventory(); 
+                    renderBayPairsUI();       
+                });
+            });
+        }
+
+        initApp();
+    </script>
+</body>
+</html>
