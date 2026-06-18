@@ -507,7 +507,7 @@
     <div id="printArea"></div>
 
     <script>
-        // --- 1. DEFINIÇÕES DA ESTRUTURA E TOPOLOGIA ---
+               // --- 1. DEFINIÇÕES DA ESTRUTURA E TOPOLOGIA ---
         const COLS_DEFAULT = ['12','10','08','06','04','02','00','01','03','05','07','09','11'];
         const ROWS_ABOVE_DEFAULT = ['92','90','88','86','84','82'];
         const ROWS_BELOW_DEFAULT = ['16','14','12','10','08','06','04','02'];
@@ -532,7 +532,7 @@
 
         let globalInventory = [];
 
-        // --- 2. DADOS DA CARGA ---
+        // --- 2. DADOS DA CARGA ATUALIZADOS ---
         const cargoData2026 = [
             { pol: 'RG', pod: 'TR', qty: 15, size: '20', base: 'dry', mods: [] },
             { pol: 'RG', pod: 'VE', qty: 20, size: '20', base: 'dry', mods: [] },
@@ -605,13 +605,7 @@
 
         // --- SISTEMA DE SALVAMENTO LOCAL & JSON ---
         function persistData() {
-            const dataToSave = {
-                version: 2, 
-                shipTopology,
-                savedShip,
-                globalInventory,
-                bayGrids
-            };
+            const dataToSave = { version: 2, shipTopology, savedShip, globalInventory, bayGrids };
             localStorage.setItem('stowagePlanData', JSON.stringify(dataToSave));
         }
 
@@ -651,7 +645,6 @@
 
                     return true;
                 } catch(e) {
-                    console.error("Erro ao carregar dados", e);
                     return false;
                 }
             }
@@ -710,10 +703,10 @@
             });
         }
 
-        // --- SISTEMA DE AUTO-STOW (AGORA COM FÍSICA E GRAVIDADE REAL) ---
+        // --- SISTEMA DE AUTO-STOW OTIMIZADO (BIN-PACKING + TOP ONLY ISOLATION) ---
         function setupAutoStow() {
             document.getElementById('btnAutoStow').addEventListener('click', () => {
-                if(!confirm("Isso aplicará as regras de Pêndulo, LIFO, Gêmeas, IMO, Reefer, OW, Top-Only e GRAVIDADE. As cargas serão reescritas. Continuar?")) return;
+                if(!confirm("Aplicar Otimização Bin-Packing? Contêineres de 40' entrarão primeiro, e Open Tops/OW serão forçados para o telhado do navio para economizar colunas. Continuar?")) return;
 
                 for(let bay in savedShip) { savedShip[bay] = {}; }
                 globalInventory.forEach(i => i.placed = 0);
@@ -721,15 +714,26 @@
                 const podWeight = { TR: 6, VE: 5, NA: 4, BA: 3, LH: 2, LB: 1 };
                 const polWeight = { RG: 1, PG: 2, ST: 3, RJ: 4, SU: 5, PE: 6 };
 
+                // ORDENAÇÃO MATADORA: LIFO PRIMEIRO -> DEPOIS BIN-PACKING (Grandes Primeiro)
                 let sortedInventory = [...globalInventory].sort((a,b) => {
                     let podDiff = (podWeight[b.pod] || 0) - (podWeight[a.pod] || 0);
                     if (podDiff !== 0) return podDiff; 
-                    return (polWeight[a.pol] || 0) - (polWeight[b.pol] || 0); 
+                    
+                    let polDiff = (polWeight[a.pol] || 0) - (polWeight[b.pol] || 0);
+                    if (polDiff !== 0) return polDiff;
+
+                    let aIsBig = (a.size === '40' || a.size === '45' || a.mods.includes('ol')) ? 1 : 0;
+                    let bIsBig = (b.size === '40' || b.size === '45' || b.mods.includes('ol')) ? 1 : 0;
+                    return bIsBig - aIsBig;
                 });
 
                 let imos = sortedInventory.filter(i => i.base === 'imo' || i.mods.includes('imo5') || i.mods.includes('imo8'));
                 let reefers = sortedInventory.filter(i => !imos.includes(i) && (i.base === 'reefer' || i.mods.includes('reefer')));
                 let standards = sortedInventory.filter(i => !imos.includes(i) && !reefers.includes(i));
+
+                // ISOLAMENTO DE DESTRUIDORES DE ESPAÇO (Serão estivados por último e no convés)
+                let standardsTop = standards.filter(i => i.base === 'opentop' || i.mods.includes('oh') || i.mods.includes('ow'));
+                let standardsNormal = standards.filter(i => !standardsTop.includes(i));
 
                 let imoPairs = [['01 IMO','03 IMO'], ['05 IMO','07 IMO']];
                 let reeferPairs = [['17 REEFER','19 REEFER'], ['33 REEFER','35 REEFER'], ['37 REEFER','39 REEFER']];
@@ -775,7 +779,6 @@
                     return idx === -1 ? [] : all.slice(idx + 1);
                 }
 
-                // FUNÇÃO VITAL: PEGA O ANDAR IMEDIATAMENTE ABAIXO
                 function getTierBelow(grid, tier) {
                     let idxB = grid.rowsBelow.indexOf(tier);
                     if(idxB !== -1) return idxB < grid.rowsBelow.length - 1 ? grid.rowsBelow[idxB + 1] : null;
@@ -817,7 +820,6 @@
                                     let twinsB2 = is40 ? getTwinBays(b2) : [];
                                     let isFree = true;
                                     
-                                    // 1. CHECAGEM DE ESPAÇO LIVRE (Incluindo bloqueios invisíveis)
                                     for(let tw of twinsB1) { 
                                         if(shipTopology[tw][coord] !== false || (savedShip[tw][coord] && savedShip[tw][coord].base !== 'blocked_ow' && savedShip[tw][coord].base !== 'blocked_ot')) isFree = false; 
                                     }
@@ -826,12 +828,10 @@
                                     }
                                     if(!isFree) continue;
 
-                                    // 2. REGRA DE GRAVIDADE (Sem contêiner voando!)
                                     let tierBelow = getTierBelow(grid, t_row);
-                                    if (tierBelow !== null) { // Se não for null, significa que não está apoiado direto no chão do porão ou do convés
+                                    if (tierBelow !== null) { 
                                         let coordBelow = `${tierBelow}-${c}`;
                                         
-                                        // A célula de baixo tem que ser casco (true) OU estar ocupada com container real.
                                         let hasPhysicalSupportB1 = false;
                                         for(let tw of twinsB1) {
                                             if (shipTopology[tw][coordBelow] !== false) hasPhysicalSupportB1 = true;
@@ -841,7 +841,6 @@
                                         }
                                         if (!hasPhysicalSupportB1) isFree = false;
 
-                                        // A mesma regra de gravidade vale para a baia vizinha no caso de contêiner de 40'
                                         if (is40 && isFree) {
                                             let hasPhysicalSupportB2 = false;
                                             for(let tw of twinsB2) {
@@ -855,7 +854,6 @@
                                     }
                                     if(!isFree) continue;
 
-                                    // 3. REGRA OVER WIDTH
                                     if (isOW) {
                                         let adjs = getAdjRolls(c);
                                         for(let a of adjs) {
@@ -869,7 +867,6 @@
                                     }
                                     if(!isFree) continue;
 
-                                    // --- ALOCAÇÃO E APLICAÇÃO DE TRAVAS ---
                                     savedShip[b1][coord] = { invId: inv.id };
                                     twinsB1.filter(tw => tw !== b1).forEach(tw => savedShip[tw][coord] = { base: 'blocked_twin' });
 
@@ -912,7 +909,8 @@
 
                 allocate(imos, imoPairs, false);
                 allocate(reefers, reeferPairs, true);
-                allocate(standards, stdPairs, false);
+                allocate(standardsNormal, stdPairs, false);
+                allocate(standardsTop, stdPairs, true); // <--- OTIMIZAÇÃO APLICADA AQUI
 
                 recalculateInventory();
                 renderBayPairsUI();
@@ -920,9 +918,9 @@
                 
                 let faltantes = globalInventory.filter(i => (i.qty - i.placed) > 0);
                 if(faltantes.length > 0) {
-                    alert(`Auto-Stow concluído. Faltaram ${faltantes.length} lote(s) que não couberam dentro das restrições geométricas e de peso.`);
+                    alert(`Otimização concluída. Faltaram ${faltantes.length} lote(s) que não couberam dentro das restrições.`);
                 } else {
-                    alert("✅ Plano 100% estivado! Nenhuma regra marítima foi quebrada.");
+                    alert("✅ Plano 100% estivado! Todos os espaços foram otimizados.");
                 }
             });
         }
@@ -1459,7 +1457,6 @@
                     <div class="axis-title">ROLL</div>
             `;
             
-            // --- ESTRUTURA INVISÍVEL PARA ALINHAMENTO MATEMÁTICO PERFEITO (TOPO) ---
             let colLabels = `<div class="axis-row" style="margin-bottom: 4px; margin-top: 4px;">`;
             colLabels += `<div class="row-label" style="visibility: hidden; border: none; pointer-events: none;">00</div>`;
             colLabels += `<div class="grid-row">`;
@@ -1517,7 +1514,6 @@
             bayHtml += `<div class="deck-separator"></div>`;
             bayHtml += drawRows(bayGrid.rowsBelow, 'row-below');
             
-            // --- ESTRUTURA INVISÍVEL PARA ALINHAMENTO MATEMÁTICO PERFEITO (FUNDO) ---
             let colFooter = `<div class="axis-row" style="margin-bottom: 4px; margin-top: 4px;">`;
             colFooter += `<div class="row-label" style="visibility: hidden; border: none; pointer-events: none;">00</div>`;
             colFooter += `<div class="grid-row">`;
