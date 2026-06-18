@@ -3,8 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Stowage auto - Tracking Manual</title>
+    <title>Stowage Auto - Tracking Manual</title>
     
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#1a2a3a">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/1000/1000966.png">
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 
     <style>
@@ -273,53 +277,44 @@
         /* "X" DE 40 PÉS */
         .layer.base-blocked40 { background-color: #ffffff !important; border: 1px solid #111; }
         .layer.base-blocked40::before { 
-            content: 'X'; 
-            position: absolute; 
-            top: 50%; left: 50%; 
-            transform: translate(-50%, -50%); 
-            font-size: 26px; 
-            font-weight: normal; 
-            font-family: 'Segoe UI', Arial, sans-serif;
-            color: #666; 
-            z-index: 30; 
+            content: 'X'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); 
+            font-size: 26px; font-weight: normal; font-family: 'Segoe UI', Arial, sans-serif;
+            color: #666; z-index: 30; 
+        }
+
+        /* "⇄" BLOQUEIO DE BAY GÊMEA (IMO/REEFER/STD) */
+        .layer.base-blocked_twin { background-color: rgba(0,0,0,0.1) !important; border: 1px solid #111; }
+        .layer.base-blocked_twin::before { 
+            content: '⇄'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); 
+            font-size: 16px; font-weight: bold; color: #444; z-index: 30; 
         }
 
         /* ====== FLAT RACK, OW, OH, OL ====== */
         .layer.base-flatrack::before { 
-            content: ''; 
-            position: absolute; 
-            bottom: 0; left: 0; right: 0; height: 25%; 
+            content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 25%; 
             background: linear-gradient(to bottom right, transparent 48%, #111 50%) left / 40% 100% no-repeat, 
                         linear-gradient(#111, #111) right / 60% 100% no-repeat;
         }
 
         .layer.mod-oh { z-index: 25; }
         .layer.mod-oh::after { 
-            content: ''; 
-            position: absolute; 
-            top: -6px; left: 10%; right: 10%; height: 6px; 
+            content: ''; position: absolute; top: -6px; left: 10%; right: 10%; height: 6px; 
             border: 1.5px solid #111; border-bottom: none; border-radius: 20px 20px 0 0; 
         }
 
         .layer.mod-ow { z-index: 25; }
         .layer.mod-ow::before { 
-            content: ''; 
-            position: absolute; 
-            left: -6px; top: 10%; bottom: 10%; width: 6px; 
+            content: ''; position: absolute; left: -6px; top: 10%; bottom: 10%; width: 6px; 
             border: 1.5px solid #111; border-right: none; border-radius: 20px 0 0 20px; 
         }
         .layer.mod-ow::after { 
-            content: ''; 
-            position: absolute; 
-            right: -6px; top: 10%; bottom: 10%; width: 6px; 
+            content: ''; position: absolute; right: -6px; top: 10%; bottom: 10%; width: 6px; 
             border: 1.5px solid #111; border-left: none; border-radius: 0 20px 20px 0; 
         }
 
         .layer.mod-ol { z-index: 25; }
         .layer.mod-ol::after { 
-            content: ''; 
-            position: absolute; 
-            top: 0px; left: 10%; right: 10%; height: 6px; 
+            content: ''; position: absolute; top: 0px; left: 10%; right: 10%; height: 6px; 
             border: 1.5px solid #111; border-top: none; border-radius: 0 0 20px 20px; 
         }
 
@@ -376,9 +371,9 @@
             <h2>🚢 Stowage Plan Pro - Bem-vindo</h2>
             <ul>
                 <li><strong style="color: #d9534f;">MUDE AS CORES (OBRIGATÓRIO):</strong> Vá na aba "1. Lista de Carga", logo abaixo, e altere a paleta de cores dos portos clicando nas caixas de cor.</li>
-                <li><strong>Auto-Estivagem (NOVO):</strong> Importe seu JSON e clique no botão roxo "Auto-Stow Inteligente" para preencher todos os seus Reefers, IMOs e containers Dry automaticamente respeitando as regras físicas (Pêndulo Simétrico, Gravidade e LIFO).</li>
-                <li><strong>Exportar/Importar Arquivo:</strong> Você pode baixar e carregar arquivos JSON na aba Lista de Carga para não perder seu trabalho ou compartilhar seu plano.</li>
-                <li><strong>Edição de Grade Individual:</strong> Clicando em "Editar Casco" você pode expandir as colunas e linhas da Bay que você selecionar. Além disso, você pode <strong>clicar no nome dos Tiers e Rolls no próprio desenho</strong> para renomeá-los.</li>
+                <li><strong>Auto-Estivagem (NOVO):</strong> Importe seu JSON e clique no botão roxo "Auto-Stow Inteligente" para preencher todos os seus Reefers, IMOs e containers Dry automaticamente respeitando as regras físicas (Pêndulo Simétrico, Gravidade, Apoio Sólido, LIFO e Sincronização de Bays Equivalentes).</li>
+                <li><strong>Sincronização de Bays:</strong> Se você alocar algo na Bay 33 REEFER, a mesma coordenada na Bay 33 (e vice-versa) ficará imediatamente bloqueada com o símbolo "⇄" para impedir sobreposição no mesmo espaço físico de aço.</li>
+                <li><strong>Exportar PDF:</strong> O sistema isola apenas os desenhos e gera um arquivo A4 Paisagem (Landscape) real sem cortes.</li>
             </ul>
             <button id="closeModalBtn" class="btn-start">Entendido, vamos começar!</button>
         </div>
@@ -537,7 +532,7 @@
 
         let globalInventory = [];
 
-        // --- 2. DADOS DA CARGA ATUALIZADOS COM POL E POD DO PDF ---
+        // --- 2. DADOS DA CARGA ---
         const cargoData2026 = [
             { pol: 'RG', pod: 'TR', qty: 15, size: '20', base: 'dry', mods: [] },
             { pol: 'RG', pod: 'VE', qty: 20, size: '20', base: 'dry', mods: [] },
@@ -596,6 +591,18 @@
             { pol: 'PE', pod: 'LH', qty: 10, size: '45', base: 'dry', mods: ['hc'] }
         ];
 
+        // --- SISTEMA DE GÊMEAS (TWIN BAYS) ---
+        function getTwinBays(bay) {
+            let res = [bay];
+            if (bay.includes(' IMO')) res.push(bay.replace(' IMO', ''));
+            else if (bay.includes(' REEFER')) res.push(bay.replace(' REEFER', ''));
+            else {
+                if (bayGrids[`${bay} IMO`]) res.push(`${bay} IMO`);
+                if (bayGrids[`${bay} REEFER`]) res.push(`${bay} REEFER`);
+            }
+            return res;
+        }
+
         // --- SISTEMA DE SALVAMENTO LOCAL & JSON ---
         function persistData() {
             const dataToSave = {
@@ -619,7 +626,6 @@
                     savedShip = parsed.savedShip || {};
                     globalInventory = parsed.globalInventory || [];
                     
-                    // Auto-Cura e Migração POL: Se carregar um inventory velho sem POL, migramos automaticamente baseado na lista 2026.
                     globalInventory.forEach((inv, idx) => {
                         if (!inv.pol && cargoData2026[idx]) inv.pol = cargoData2026[idx].pol;
                         else if (!inv.pol) inv.pol = 'RG';
@@ -627,7 +633,6 @@
 
                     bayGrids = parsed.bayGrids || {};
 
-                    // Auto-Cura de Casco
                     BAY_PAIRS.forEach(pair => {
                         pair.forEach(b => {
                             if (!bayGrids[b] || !bayGrids[b].cols) {
@@ -685,7 +690,6 @@
                     try {
                         const parsed = JSON.parse(ev.target.result);
                         if(parsed.shipTopology && parsed.savedShip) {
-                            // Migra dados de POL se o JSON injetado for o antigo
                             if(parsed.globalInventory) {
                                 parsed.globalInventory.forEach((inv, idx) => {
                                     if(!inv.pol && cargoData2026[idx]) inv.pol = cargoData2026[idx].pol;
@@ -706,27 +710,23 @@
             });
         }
 
-        // --- SISTEMA DE AUTO-STOW INTELIGENTE (PÊNDULO, LIFO, GRAVIDADE) ---
+        // --- SISTEMA DE AUTO-STOW (AGORA COM FÍSICA E GRAVIDADE REAL) ---
         function setupAutoStow() {
             document.getElementById('btnAutoStow').addEventListener('click', () => {
-                if(!confirm("Isso aplicará as regras de Pêndulo Simétrico, LIFO, IMO, Reefer, OW e Top-Only. As cargas antigas serão reescritas. Continuar?")) return;
+                if(!confirm("Isso aplicará as regras de Pêndulo, LIFO, Gêmeas, IMO, Reefer, OW, Top-Only e GRAVIDADE. As cargas serão reescritas. Continuar?")) return;
 
-                // 1. Limpeza
                 for(let bay in savedShip) { savedShip[bay] = {}; }
                 globalInventory.forEach(i => i.placed = 0);
 
-                // 2. Tabela de Pesos LIFO (Descarga descrescente, Carga crescente)
                 const podWeight = { TR: 6, VE: 5, NA: 4, BA: 3, LH: 2, LB: 1 };
                 const polWeight = { RG: 1, PG: 2, ST: 3, RJ: 4, SU: 5, PE: 6 };
 
-                // 3. Ordenação rigorosa LIFO
                 let sortedInventory = [...globalInventory].sort((a,b) => {
                     let podDiff = (podWeight[b.pod] || 0) - (podWeight[a.pod] || 0);
                     if (podDiff !== 0) return podDiff; 
                     return (polWeight[a.pol] || 0) - (polWeight[b.pol] || 0); 
                 });
 
-                // 4. Divisão de Categorias
                 let imos = sortedInventory.filter(i => i.base === 'imo' || i.mods.includes('imo5') || i.mods.includes('imo8'));
                 let reefers = sortedInventory.filter(i => !imos.includes(i) && (i.base === 'reefer' || i.mods.includes('reefer')));
                 let standards = sortedInventory.filter(i => !imos.includes(i) && !reefers.includes(i));
@@ -735,7 +735,6 @@
                 let reeferPairs = [['17 REEFER','19 REEFER'], ['33 REEFER','35 REEFER'], ['37 REEFER','39 REEFER']];
                 let stdPairs = [['01','03'], ['05','07'], ['09','11'], ['13','15'], ['17','19'], ['21','23'], ['25','27'], ['33','35'], ['37','39']];
 
-                // 5. Função de Sorteio com Pêndulo Espelhado (Anti-Banda)
                 function getPendulum(cols) {
                     let pairs = []; let center = null;
                     cols.forEach(c => {
@@ -752,17 +751,16 @@
                             if(!cols.includes(even)) pairs.push([c]);
                         }
                     });
-                    pairs.sort(() => Math.random() - 0.5); // Embaralha as colunas
+                    pairs.sort(() => Math.random() - 0.5); 
                     let res = [];
                     pairs.forEach(p => {
-                        if(p.length === 2 && Math.random() > 0.5) res.push(p[1], p[0]); // Randomiza qual bordo ataca primeiro
+                        if(p.length === 2 && Math.random() > 0.5) res.push(p[1], p[0]);
                         else res.push(...p);
                     });
                     if(center) res.push(center);
                     return res;
                 }
 
-                // Auxiliares de Restrição
                 function getAdjRolls(r) {
                     if(r === '00') return ['01', '02'];
                     if(r === '01') return ['00', '03'];
@@ -777,9 +775,17 @@
                     return idx === -1 ? [] : all.slice(idx + 1);
                 }
 
-                // 6. O Motor Central
+                // FUNÇÃO VITAL: PEGA O ANDAR IMEDIATAMENTE ABAIXO
+                function getTierBelow(grid, tier) {
+                    let idxB = grid.rowsBelow.indexOf(tier);
+                    if(idxB !== -1) return idxB < grid.rowsBelow.length - 1 ? grid.rowsBelow[idxB + 1] : null;
+                    let idxA = grid.rowsAbove.indexOf(tier);
+                    if(idxA !== -1) return idxA < grid.rowsAbove.length - 1 ? grid.rowsAbove[idxA + 1] : null;
+                    return null;
+                }
+
                 function allocate(items, pairsAllowed, preferDeck) {
-                    let pAllowed = [...pairsAllowed].sort(() => Math.random() - 0.5); // Sorteia o ponto de início ao longo do navio
+                    let pAllowed = [...pairsAllowed].sort(() => Math.random() - 0.5); 
 
                     items.forEach(inv => {
                         let remaining = inv.qty - inv.placed;
@@ -795,53 +801,104 @@
                             let grid = bayGrids[b1];
                             if(!grid || !shipTopology[b1] || !shipTopology[b2]) continue;
 
-                            // Respeito sagrado à Gravidade
                             let deckTiers = grid.rowsAbove.slice().reverse();
                             let holdTiers = grid.rowsBelow.slice().reverse();
                             let tiers = preferDeck ? [...deckTiers, ...holdTiers] : [...holdTiers, ...deckTiers];
 
-                            for (let t of tiers) {
+                            for (let t_row of tiers) {
                                 if(remaining <= 0) break;
-                                let pCols = getPendulum(grid.cols); // Pêndulo aplicado a cada tier
+                                let pCols = getPendulum(grid.cols); 
 
                                 for(let c of pCols) {
                                     if(remaining <= 0) break;
-                                    let coord = `${t}-${c}`;
+                                    let coord = `${t_row}-${c}`;
 
-                                    // Verifica Topologia base e se já foi alocado/bloqueado
-                                    if (shipTopology[b1][coord] !== false || savedShip[b1][coord]) continue;
-                                    if (is40 && (shipTopology[b2][coord] !== false || savedShip[b2][coord])) continue;
+                                    let twinsB1 = getTwinBays(b1);
+                                    let twinsB2 = is40 ? getTwinBays(b2) : [];
+                                    let isFree = true;
+                                    
+                                    // 1. CHECAGEM DE ESPAÇO LIVRE (Incluindo bloqueios invisíveis)
+                                    for(let tw of twinsB1) { 
+                                        if(shipTopology[tw][coord] !== false || (savedShip[tw][coord] && savedShip[tw][coord].base !== 'blocked_ow' && savedShip[tw][coord].base !== 'blocked_ot')) isFree = false; 
+                                    }
+                                    for(let tw of twinsB2) { 
+                                        if(shipTopology[tw][coord] !== false || (savedShip[tw][coord] && savedShip[tw][coord].base !== 'blocked_ow' && savedShip[tw][coord].base !== 'blocked_ot')) isFree = false; 
+                                    }
+                                    if(!isFree) continue;
 
-                                    // Regra OW: Vizinhos não podem ter carga real alocada neles
+                                    // 2. REGRA DE GRAVIDADE (Sem contêiner voando!)
+                                    let tierBelow = getTierBelow(grid, t_row);
+                                    if (tierBelow !== null) { // Se não for null, significa que não está apoiado direto no chão do porão ou do convés
+                                        let coordBelow = `${tierBelow}-${c}`;
+                                        
+                                        // A célula de baixo tem que ser casco (true) OU estar ocupada com container real.
+                                        let hasPhysicalSupportB1 = false;
+                                        for(let tw of twinsB1) {
+                                            if (shipTopology[tw][coordBelow] !== false) hasPhysicalSupportB1 = true;
+                                            else if (savedShip[tw][coordBelow] && (savedShip[tw][coordBelow].invId || savedShip[tw][coordBelow].base === 'blocked40' || savedShip[tw][coordBelow].base === 'blocked_twin')) {
+                                                hasPhysicalSupportB1 = true;
+                                            }
+                                        }
+                                        if (!hasPhysicalSupportB1) isFree = false;
+
+                                        // A mesma regra de gravidade vale para a baia vizinha no caso de contêiner de 40'
+                                        if (is40 && isFree) {
+                                            let hasPhysicalSupportB2 = false;
+                                            for(let tw of twinsB2) {
+                                                if (shipTopology[tw][coordBelow] !== false) hasPhysicalSupportB2 = true;
+                                                else if (savedShip[tw][coordBelow] && (savedShip[tw][coordBelow].invId || savedShip[tw][coordBelow].base === 'blocked40' || savedShip[tw][coordBelow].base === 'blocked_twin')) {
+                                                    hasPhysicalSupportB2 = true;
+                                                }
+                                            }
+                                            if (!hasPhysicalSupportB2) isFree = false;
+                                        }
+                                    }
+                                    if(!isFree) continue;
+
+                                    // 3. REGRA OVER WIDTH
                                     if (isOW) {
                                         let adjs = getAdjRolls(c);
-                                        let owBlocked = false;
                                         for(let a of adjs) {
-                                            if (shipTopology[b1][`${t}-${a}`] === false && savedShip[b1][`${t}-${a}`] && savedShip[b1][`${t}-${a}`].invId) owBlocked = true;
-                                            if (is40 && shipTopology[b2][`${t}-${a}`] === false && savedShip[b2][`${t}-${a}`] && savedShip[b2][`${t}-${a}`].invId) owBlocked = true;
+                                            for(let tw of twinsB1) {
+                                                if(shipTopology[tw][`${t_row}-${a}`] === false && savedShip[tw][`${t_row}-${a}`] && savedShip[tw][`${t_row}-${a}`].invId) isFree = false;
+                                            }
+                                            for(let tw of twinsB2) {
+                                                if(shipTopology[tw][`${t_row}-${a}`] === false && savedShip[tw][`${t_row}-${a}`] && savedShip[tw][`${t_row}-${a}`].invId) isFree = false;
+                                            }
                                         }
-                                        if(owBlocked) continue;
+                                    }
+                                    if(!isFree) continue;
+
+                                    // --- ALOCAÇÃO E APLICAÇÃO DE TRAVAS ---
+                                    savedShip[b1][coord] = { invId: inv.id };
+                                    twinsB1.filter(tw => tw !== b1).forEach(tw => savedShip[tw][coord] = { base: 'blocked_twin' });
+
+                                    if (is40) {
+                                        savedShip[b2][coord] = { base: 'blocked40' };
+                                        twinsB2.filter(tw => tw !== b2).forEach(tw => savedShip[tw][coord] = { base: 'blocked_twin' });
                                     }
 
-                                    // Alocação Final
-                                    savedShip[b1][coord] = { invId: inv.id };
-                                    if (is40) savedShip[b2][coord] = { base: 'blocked40' }; // Tranca irmão longitudinal
-
-                                    // OW joga uma trava invisível nos vizinhos imediatos para prever que ninguém aloque ali depois
                                     if (isOW) {
                                         let adjs = getAdjRolls(c);
                                         adjs.forEach(a => {
-                                            if(shipTopology[b1][`${t}-${a}`] === false && !savedShip[b1][`${t}-${a}`]) savedShip[b1][`${t}-${a}`] = { base: 'blocked_ow' };
-                                            if(is40 && shipTopology[b2][`${t}-${a}`] === false && !savedShip[b2][`${t}-${a}`]) savedShip[b2][`${t}-${a}`] = { base: 'blocked_ow' };
+                                            twinsB1.forEach(tw => {
+                                                if(shipTopology[tw][`${t_row}-${a}`] === false && !savedShip[tw][`${t_row}-${a}`]) savedShip[tw][`${t_row}-${a}`] = { base: 'blocked_ow' };
+                                            });
+                                            twinsB2.forEach(tw => {
+                                                if(shipTopology[tw][`${t_row}-${a}`] === false && !savedShip[tw][`${t_row}-${a}`]) savedShip[tw][`${t_row}-${a}`] = { base: 'blocked_ow' };
+                                            });
                                         });
                                     }
 
-                                    // Open Top trava todos os andares de cima (ninguém vai pisar nele nas varreduras seguintes)
                                     if (isOpenTop) {
-                                        let above = getTiersAbove(grid, t);
+                                        let above = getTiersAbove(grid, t_row);
                                         above.forEach(at => {
-                                            if(shipTopology[b1][`${at}-${c}`] === false && !savedShip[b1][`${at}-${c}`]) savedShip[b1][`${at}-${c}`] = { base: 'blocked_ot' };
-                                            if(is40 && shipTopology[b2][`${at}-${c}`] === false && !savedShip[b2][`${at}-${c}`]) savedShip[b2][`${at}-${c}`] = { base: 'blocked_ot' };
+                                            twinsB1.forEach(tw => {
+                                                if(shipTopology[tw][`${at}-${c}`] === false && !savedShip[tw][`${at}-${c}`]) savedShip[tw][`${at}-${c}`] = { base: 'blocked_ot' };
+                                            });
+                                            twinsB2.forEach(tw => {
+                                                if(shipTopology[tw][`${at}-${c}`] === false && !savedShip[tw][`${at}-${c}`]) savedShip[tw][`${at}-${c}`] = { base: 'blocked_ot' };
+                                            });
                                         });
                                     }
 
@@ -863,9 +920,9 @@
                 
                 let faltantes = globalInventory.filter(i => (i.qty - i.placed) > 0);
                 if(faltantes.length > 0) {
-                    alert(`Auto-Stow concluído. Faltaram ${faltantes.length} lote(s) que não couberam dentro das restrições de geometria atuais.`);
+                    alert(`Auto-Stow concluído. Faltaram ${faltantes.length} lote(s) que não couberam dentro das restrições geométricas e de peso.`);
                 } else {
-                    alert("✅ Plano perfeitamente estivado! (Simétrico, LIFO, com restrições IMO/Reefer/OW/OT).");
+                    alert("✅ Plano 100% estivado! Nenhuma regra marítima foi quebrada.");
                 }
             });
         }
@@ -1430,6 +1487,8 @@
                         if (cellData) {
                             if (cellData.base === 'blocked40') {
                                 contentHtml = `<div class="layer base-blocked40"></div>`;
+                            } else if (cellData.base === 'blocked_twin') {
+                                contentHtml = `<div class="layer base-blocked_twin" title="Ocupado na planta equivalente"></div>`;
                             } else if (cellData.base === 'blocked_ow' || cellData.base === 'blocked_ot') {
                                 bgColorStyle = isPrint ? 'background-color: #ffffff !important;' : 'background-color: var(--port-empty);';
                             } else if (cellData.invId !== undefined) {
@@ -1535,26 +1594,43 @@
             loadingOverlay.style.display = 'none';
         }
 
-        // --- 7. LÓGICA DE CLIQUE E SHIFT ---
+        // --- 7. LÓGICA DE CLIQUE E SHIFT (Com Sincronia de Gêmeas) ---
         function removeContainer(bayId, rStr, cStr) {
             let coord = `${rStr}-${cStr}`;
             let existing = savedShip[bayId][coord];
             if (!existing) return;
             
+            if (existing.base === 'blocked_twin') {
+                alert("Este slot está ocupado na planta principal (Normal, IMO ou REEFER). Remova-o por lá.");
+                return;
+            }
+
             if (existing.base === 'blocked40') {
                 let sibling = getSiblingBay(bayId);
-                if(sibling && savedShip[sibling][coord]) {
-                    delete savedShip[sibling][coord];
-                }
-                delete savedShip[bayId][coord];
-            } 
-            else if (existing.invId !== undefined) {
+                if (sibling) removeContainer(sibling, rStr, cStr);
+                return;
+            }
+            
+            if (existing.invId !== undefined) {
                 let inv = globalInventory.find(i => i.id === existing.invId);
-                if (inv && (inv.size === '40' || inv.size === '45' || inv.mods.includes('ol'))) {
+                let is40 = inv && (inv.size === '40' || inv.size === '45' || inv.mods.includes('ol'));
+                
+                let twinsB1 = getTwinBays(bayId);
+                twinsB1.forEach(t => {
+                    if (savedShip[t][coord]) delete savedShip[t][coord];
+                });
+
+                if (is40) {
                     let sibling = getSiblingBay(bayId);
-                    if(sibling) delete savedShip[sibling][coord];
+                    if (sibling) {
+                        let twinsB2 = getTwinBays(sibling);
+                        twinsB2.forEach(t => {
+                            if (savedShip[t][coord]) delete savedShip[t][coord];
+                        });
+                    }
                 }
-                delete savedShip[bayId][coord];
+            } else {
+                 delete savedShip[bayId][coord];
             }
         }
 
@@ -1587,8 +1663,12 @@
         function placeContainer(bayId, rStr, cStr, showAlert = true) {
             let coord = `${rStr}-${cStr}`;
             if (shipTopology[bayId][coord]) return; 
-            if (savedShip[bayId][coord] && savedShip[bayId][coord].base !== 'blocked_ow' && savedShip[bayId][coord].base !== 'blocked_ot') return; 
             
+            let twinsB1 = getTwinBays(bayId);
+            for(let t of twinsB1) {
+                 if(savedShip[t][coord] && savedShip[t][coord].base !== 'blocked_ow' && savedShip[t][coord].base !== 'blocked_ot') return;
+            }
+
             if (activeInvId !== null) {
                 let inv = globalInventory.find(i => i.id === activeInvId);
                 let remaining = inv.qty - inv.placed;
@@ -1598,13 +1678,19 @@
 
                     if (inv.size === '40' || inv.size === '45' || inv.mods.includes('ol')) {
                         let sibling = getSiblingBay(bayId);
-                        if (!sibling || shipTopology[sibling][coord] || (savedShip[sibling][coord] && savedShip[sibling][coord].base !== 'blocked_ow' && savedShip[sibling][coord].base !== 'blocked_ot')) {
-                            return; 
+                        if (!sibling) return;
+                        
+                        let twinsB2 = getTwinBays(sibling);
+                        for(let t of twinsB2) {
+                            if (shipTopology[t][coord] || (savedShip[t][coord] && savedShip[t][coord].base !== 'blocked_ow' && savedShip[t][coord].base !== 'blocked_ot')) return;
                         }
+                        
                         savedShip[sibling][coord] = { base: 'blocked40' }; 
+                        twinsB2.filter(t => t !== sibling).forEach(t => savedShip[t][coord] = { base: 'blocked_twin' });
                     }
                     
                     savedShip[bayId][coord] = { invId: inv.id };
+                    twinsB1.filter(t => t !== bayId).forEach(t => savedShip[t][coord] = { base: 'blocked_twin' });
                     inv.placed++; 
                 }
             }
@@ -1652,7 +1738,7 @@
                              isShiftActionFill = shipTopology[bayId][coord]; 
                         } else {
                              let existing = savedShip[bayId][coord];
-                             if(existing && (existing.invId !== undefined || existing.base === 'blocked40')) {
+                             if(existing && (existing.invId !== undefined || existing.base === 'blocked40' || existing.base === 'blocked_twin')) {
                                  removeContainer(bayId, rStr, cStr);
                                  isShiftActionFill = false; 
                              } else {
@@ -1666,6 +1752,19 @@
                     recalculateInventory(); 
                     renderBayPairsUI();       
                 });
+            });
+        }
+
+        // --- REGISTRO DO SERVICE WORKER (PWA) ---
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js')
+                    .then(registration => {
+                        console.log('ServiceWorker registrado com sucesso no escopo:', registration.scope);
+                    })
+                    .catch(error => {
+                        console.log('Falha ao registrar o ServiceWorker:', error);
+                    });
             });
         }
 
