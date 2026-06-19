@@ -144,7 +144,16 @@
         .btn-filter.active { background: #f39c12; }
         .btn-auto-stow { width: 100%; background: #5cb85c; color: white; border: none; padding: 10px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 12px; margin-top: 10px; }
         .btn-auto-stow:hover { background: #4cae4c; }
+        .btn-auto-stow:disabled { opacity: 0.65; cursor: wait; }
         .auto-stow-report { display: none; margin-top: 10px; padding: 8px; background: #eefaf0; border: 1px solid #b7dfbd; color: #224422; border-radius: 4px; font-size: 11px; line-height: 1.35; max-height: 110px; overflow-y: auto; user-select: text; }
+        .auto-attempt-box { margin-top: 10px; padding: 9px; background: #f4f8fb; border: 1px solid #d5e2ee; border-radius: 6px; }
+        .auto-attempt-box label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; font-weight: bold; color: #34495e; }
+        .auto-attempt-box input { width: 100%; padding: 7px; border: 1px solid #bfcbd6; border-radius: 4px; font-size: 13px; font-weight: bold; }
+        .auto-stow-hint { font-size: 10px; color: #687887; margin-top: 6px; line-height: 1.25; }
+        .auto-progress-wrap { display: none; margin-top: 10px; padding: 8px; background: #fff; border: 1px solid #d5e2ee; border-radius: 6px; }
+        .auto-progress-track { width: 100%; height: 12px; background: #e1e8ef; border-radius: 999px; overflow: hidden; }
+        .auto-progress-bar { width: 0%; height: 100%; background: #5cb85c; border-radius: 999px; transition: width 0.12s linear; }
+        .auto-progress-text { margin-top: 6px; font-size: 10px; color: #34495e; line-height: 1.25; user-select: text; }
 
         /* PAINEL DE EXPANSÃO DA GRADE */
         .grid-edit-panel { background: #ffebee; border: 1px solid #ffcaca; border-radius: 6px; padding: 12px; margin-bottom: 15px; display: none; }
@@ -530,7 +539,17 @@
                         <button class="btn-filter" id="btnFilterIMO">🔍 Ver IMO</button>
                         <button class="btn-filter" id="btnFilterReefer">❄️ Ver Reefer</button>
                     </div>
-                    <button class="btn-auto-stow" id="btnAutoStow">⚙️ Estivar Automaticamente</button>
+                    <div class="auto-attempt-box">
+                        <label>Quantidade de tentativas
+                            <input type="number" id="autoAttemptCount" min="1" max="5000" step="50" value="500">
+                        </label>
+                        <div class="auto-stow-hint">Mais tentativas = mais chance de achar uma estivagem melhor. Tentativas piores são descartadas automaticamente.</div>
+                    </div>
+                    <button class="btn-auto-stow" id="btnAutoStow">🧠 Estivar Automaticamente</button>
+                    <div id="autoProgressWrap" class="auto-progress-wrap">
+                        <div class="auto-progress-track"><div id="autoProgressBar" class="auto-progress-bar"></div></div>
+                        <div id="autoProgressText" class="auto-progress-text">Aguardando início...</div>
+                    </div>
                     <div id="autoStowReport" class="auto-stow-report"></div>
                 </div>
 
@@ -554,6 +573,7 @@
     <div id="printArea"></div>
 
     <script>
+
         // --- 1. DEFINIÇÕES DA ESTRUTURA E TOPOLOGIA ---
         const COLS_DEFAULT = ['12','10','08','06','04','02','00','01','03','05','07','09','11'];
         const ROWS_ABOVE_DEFAULT = ['92','90','88','86','84','82'];
@@ -1806,52 +1826,368 @@
             });
         }
 
-        function runAutoStowage() {
+        function clonePlainObject(obj) {
+            return JSON.parse(JSON.stringify(obj || {}));
+        }
+
+        function getAutoAttemptsFromInput() {
+            const input = document.getElementById('autoAttemptCount');
+            let val = input ? parseInt(input.value, 10) : 500;
+            if (!Number.isFinite(val) || val < 1) val = 1;
+            if (val > 5000) val = 5000;
+            if (input) input.value = val;
+            return val;
+        }
+
+        function escapeAutoHtml(text) {
+            return String(text)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        function createAutoRng(seed) {
+            let s = (seed >>> 0) || 123456789;
+            return function() {
+                s = (Math.imul(1664525, s) + 1013904223) >>> 0;
+                return s / 4294967296;
+            };
+        }
+
+        function autoYield() {
+            return new Promise(resolve => setTimeout(resolve, 0));
+        }
+
+        function setAutoProgress(done, total, bestPlaced, totalCargo, detail = '') {
+            const wrap = document.getElementById('autoProgressWrap');
+            const bar = document.getElementById('autoProgressBar');
+            const text = document.getElementById('autoProgressText');
+            if (!wrap || !bar || !text) return;
+            wrap.style.display = 'block';
+            const pct = total > 0 ? Math.min(100, Math.max(0, (done / total) * 100)) : 0;
+            bar.style.width = pct.toFixed(1) + '%';
+            text.innerHTML = `Tentativa ${done}/${total} — melhor até agora: ${bestPlaced}/${totalCargo}` + (detail ? `<br>${escapeAutoHtml(detail)}` : '');
+        }
+
+        function setAutoReport(lines, isRunning = false) {
+            const reportBox = document.getElementById('autoStowReport');
+            if (!reportBox) return;
+            reportBox.style.display = 'block';
+            const title = isRunning ? 'Processando:' : 'Resultado:';
+            reportBox.innerHTML = `<strong>${title}</strong><br>${lines.map(line => escapeAutoHtml(line)).join('<br>')}`;
+        }
+
+        function getAutoCategory(inv) {
+            if (isImoInventory(inv)) return 0;
+            if (isReeferInventory(inv)) return 1;
+            if (hasMod(inv, 'ow') || hasMod(inv, 'oh') || hasMod(inv, 'ol')) return 2;
+            if (inv.size === '40' || inv.size === '45') return 3;
+            if (isTankInventory(inv)) return 4;
+            if (isEmptyInventory(inv)) return 7;
+            return 5;
+        }
+
+        function getAutoUnitPriority(inv, attemptIndex, rng) {
+            const category = getAutoCategory(inv);
+            const pol = getOrderIndex(POL_ORDER, inv.pol);
+            const pod = getOrderIndex(POD_ORDER, inv.pod);
+            const laterPodFirst = (POD_ORDER.length - pod) * 1000;
+            const earlierPolFirst = pol * 1000;
+            const sizeBias = (inv.size === '40' || inv.size === '45') ? -350 : (inv.size === '20' ? 120 : 0);
+            const specialBias = (hasMod(inv, 'oh') || hasMod(inv, 'ow') || hasMod(inv, 'ol')) ? -200 : 0;
+            const strategy = attemptIndex % 12;
+
+            let score = category * 1000000;
+
+            if (strategy === 0) {
+                score += earlierPolFirst * 10 + laterPodFirst * 5;
+            } else if (strategy === 1) {
+                score += laterPodFirst * 12 + earlierPolFirst * 4;
+            } else if (strategy === 2) {
+                score += earlierPolFirst * 14 + laterPodFirst * 3;
+            } else if (strategy === 3) {
+                score += laterPodFirst * 8 + earlierPolFirst * 8;
+            } else if (strategy === 4) {
+                score += laterPodFirst * 10 - pol * 650;
+            } else if (strategy === 5) {
+                score += earlierPolFirst * 8 - pod * 650;
+            } else if (strategy === 6) {
+                score += laterPodFirst * 7 + earlierPolFirst * 7 + (isTankInventory(inv) ? -300000 : 0);
+            } else if (strategy === 7) {
+                score += laterPodFirst * 7 + earlierPolFirst * 7 + (isEmptyInventory(inv) ? 300000 : 0);
+            } else if (strategy === 8) {
+                score += laterPodFirst * 9 + earlierPolFirst * 5 + ((inv.size === '40' || inv.size === '45') ? -120000 : 0);
+            } else if (strategy === 9) {
+                score += laterPodFirst * 5 + earlierPolFirst * 9 + (inv.size === '20' ? -50000 : 0);
+            } else if (strategy === 10) {
+                score += laterPodFirst * 6 + earlierPolFirst * 6 + specialBias * 20;
+            } else {
+                score += laterPodFirst * 6 + earlierPolFirst * 6;
+            }
+
+            score += sizeBias + specialBias;
+
+            if (attemptIndex > 0) {
+                // Mantém as categorias principais, mas bagunça a ordem interna para testar empilhamentos diferentes.
+                const noise = (rng() - 0.5) * 380000;
+                score += noise;
+            }
+
+            return score;
+        }
+
+        function buildAutoUnitOrder(attemptIndex, rng) {
+            const units = [];
+            globalInventory.forEach(inv => {
+                if (!inv || inv.qty <= 0) return;
+                for (let i = 0; i < inv.qty; i++) units.push({ inv, priority: getAutoUnitPriority(inv, attemptIndex, rng) });
+            });
+            units.sort((a, b) => a.priority - b.priority);
+            return units.map(u => u.inv);
+        }
+
+        function chooseAutoCandidate(candidates, inv, attemptIndex, rng) {
+            if (!candidates.length) return null;
+            if (attemptIndex === 0) return candidates[0];
+
+            const strategy = attemptIndex % 10;
+            const adjusted = candidates.map(c => {
+                let score = c.score;
+                const deck = isDeckRow(c.bayId, c.row);
+                const level = getVerticalLevelFromBottom(c.bayId, c.row);
+                const center = getColumnCenterDistance(c.bayId, c.col);
+
+                if (strategy === 1 && isReeferInventory(inv)) score += deck ? -1200 : 600;
+                if (strategy === 2 && isReeferInventory(inv)) score += deck ? -400 : -900;
+                if (strategy === 3 && isEmptyInventory(inv)) score -= level * 90;
+                if (strategy === 4 && isTankInventory(inv)) score += level * 120 + center * 25;
+                if (strategy === 5 && (inv.size === '40' || inv.size === '45')) score -= 600;
+                if (strategy === 6 && inv.size === '20') score -= 250;
+                if (strategy === 7 && hasMod(inv, 'ow')) score += center * 35;
+                if (strategy === 8 && hasMod(inv, 'oh')) score -= level * 90;
+                if (strategy === 9) score += center * 12;
+
+                // Pequeno ruído para evitar repetir sempre a mesma escolha.
+                score += (rng() - 0.5) * (strategy <= 2 ? 900 : 1700);
+                return { ...c, adjustedScore: score };
+            }).sort((a, b) => a.adjustedScore - b.adjustedScore);
+
+            const limits = [2, 3, 4, 6, 8, 10, 14, 18, 24, Math.min(adjusted.length, 35)];
+            let limit = limits[attemptIndex % limits.length] || 6;
+            limit = Math.max(1, Math.min(limit, adjusted.length));
+
+            // Escolha ponderada entre os melhores. A primeira posição ainda é bem favorecida.
+            let totalWeight = 0;
+            const weights = [];
+            for (let i = 0; i < limit; i++) {
+                const w = 1 / ((i + 1) * (i + 1));
+                weights.push(w);
+                totalWeight += w;
+            }
+            let pick = rng() * totalWeight;
+            for (let i = 0; i < limit; i++) {
+                pick -= weights[i];
+                if (pick <= 0) return adjusted[i];
+            }
+            return adjusted[0];
+        }
+
+        function getCurrentPlacedCount() {
+            return globalInventory.reduce((sum, inv) => sum + (parseInt(inv.placed, 10) || 0), 0);
+        }
+
+        function getAutoTotalCargo() {
+            return globalInventory.reduce((sum, inv) => sum + (parseInt(inv.qty, 10) || 0), 0);
+        }
+
+        function getPlacedSpecialCount() {
+            return globalInventory.reduce((sum, inv) => {
+                if (isReeferInventory(inv) || isImoInventory(inv) || hasMod(inv, 'ow') || hasMod(inv, 'oh') || hasMod(inv, 'ol')) {
+                    return sum + (parseInt(inv.placed, 10) || 0);
+                }
+                return sum;
+            }, 0);
+        }
+
+        function recalculateInventoryCountsOnly() {
+            globalInventory.forEach(inv => inv.placed = 0);
+            let countedSlots = new Set();
+            for (let bay in savedShip) {
+                let baseBay = bay.replace(' IMO', '').replace(' REEFER', '');
+                for (let coord in savedShip[bay]) {
+                    let cell = savedShip[bay][coord];
+                    if (cell && cell.invId !== undefined) {
+                        let uniqueId = `${cell.invId}-${baseBay}-${coord}`;
+                        if (!countedSlots.has(uniqueId)) {
+                            countedSlots.add(uniqueId);
+                            let inv = globalInventory.find(i => i.id === cell.invId);
+                            if(inv) inv.placed++;
+                        }
+                    }
+                }
+            }
+        }
+
+        function applyBestAutoResultToState(bestResult, renderView = false, saveNow = false) {
+            if (!bestResult || !bestResult.savedShip) return false;
+            savedShip = clonePlainObject(bestResult.savedShip);
+            recalculateInventoryCountsOnly();
+            if (renderView) {
+                renderInventoryPalette();
+                renderBayPairsUI();
+            }
+            if (saveNow) persistData();
+            return true;
+        }
+
+        function runSingleAutoAttempt(attemptIndex) {
+            clearAutoStowedCargoOnly();
+            const seed = ((Date.now() & 0xffffffff) ^ Math.imul(attemptIndex + 1, 2654435761)) >>> 0;
+            const rng = createAutoRng(seed);
+            const units = buildAutoUnitOrder(attemptIndex, rng);
+            const failures = [];
+            let placementScore = 0;
+            let placed = 0;
+
+            for (let i = 0; i < units.length; i++) {
+                const inv = units[i];
+                const candidates = getAutoCandidates(inv);
+                const chosen = chooseAutoCandidate(candidates, inv, attemptIndex, rng);
+                if (chosen) {
+                    commitAutoPlacement(inv, chosen.bayId, chosen.row, chosen.col);
+                    placed++;
+                    placementScore += chosen.score;
+                } else {
+                    failures.push(inv);
+                }
+            }
+
+            return {
+                attemptIndex,
+                placed,
+                specialPlaced: getPlacedSpecialCount(),
+                placementScore,
+                savedShip: clonePlainObject(savedShip),
+                failures: failures.map(inv => ({ pol: inv.pol, pod: inv.pod, qty: inv.qty, size: inv.size, base: inv.base, mods: [...(inv.mods || [])] }))
+            };
+        }
+
+        function isBetterAutoResult(candidate, currentBest) {
+            if (!currentBest) return true;
+            if (candidate.placed !== currentBest.placed) return candidate.placed > currentBest.placed;
+            if (candidate.specialPlaced !== currentBest.specialPlaced) return candidate.specialPlaced > currentBest.specialPlaced;
+            return candidate.placementScore < currentBest.placementScore;
+        }
+
+        function summarizeAutoFailures(failures) {
+            const byKey = {};
+            failures.forEach(inv => {
+                const key = `${inv.pol || '?'} > ${inv.pod} | ${inv.size}' ${String(inv.base || '').toUpperCase()} ${(inv.mods || []).join(', ').toUpperCase()}`.trim();
+                byKey[key] = (byKey[key] || 0) + 1;
+            });
+            return Object.entries(byKey).map(([k, v]) => `${v} não alocado(s): ${k}`);
+        }
+
+        let autoStowRunning = false;
+
+        async function runAutoStowage() {
+            if (autoStowRunning) return;
             syncInventoryFromTable();
             applyHiddenPolToInventory();
 
-            if (!confirm('A estivagem automática vai limpar apenas os contêineres já alocados e manter o formato das bays/casco. Continuar?')) return;
+            const attempts = getAutoAttemptsFromInput();
+            if (!confirm(`A estivagem automática forte vai limpar apenas os contêineres já alocados e manter o formato das bays/casco.\n\nTentativas: ${attempts}\n\nContinuar?`)) return;
 
-            clearAutoStowedCargoOnly();
-
-            const groups = [...globalInventory].filter(inv => inv.qty > 0).sort((a, b) => getAutoGroupSortScore(a) - getAutoGroupSortScore(b));
-            const failures = [];
-            let total = 0;
-            let placed = 0;
-
-            groups.forEach(inv => {
-                for (let i = 0; i < inv.qty; i++) {
-                    total++;
-                    const candidates = getAutoCandidates(inv);
-                    if (candidates.length) {
-                        const chosen = candidates[0];
-                        commitAutoPlacement(inv, chosen.bayId, chosen.row, chosen.col);
-                        placed++;
-                    } else {
-                        failures.push(inv);
-                    }
-                }
-            });
-
-            recalculateInventory();
-            persistData();
-            renderBayPairsUI();
-
-            const byKey = {};
-            failures.forEach(inv => {
-                const key = `${inv.pol || '?'} > ${inv.pod} | ${inv.qty}x ${inv.size}' ${inv.base.toUpperCase()} ${inv.mods.join(', ').toUpperCase()}`;
-                byKey[key] = (byKey[key] || 0) + 1;
-            });
-            const failureLines = Object.entries(byKey).map(([k, v]) => `${v} não alocado(s): ${k}`);
-            const report = [`Estivagem automática concluída.`, `Alocados: ${placed}/${total}.`, ...failureLines.slice(0, 20)];
-            if (failureLines.length > 20) report.push(`... e mais ${failureLines.length - 20} grupos com sobra.`);
-
-            const reportBox = document.getElementById('autoStowReport');
-            if (reportBox) {
-                reportBox.style.display = 'block';
-                reportBox.innerHTML = `<strong>Resultado:</strong><br>${report.map(line => line.replace(/</g, '&lt;').replace(/>/g, '&gt;')).join('<br>')}`;
+            autoStowRunning = true;
+            const btn = document.getElementById('btnAutoStow');
+            if (btn) {
+                btn.disabled = true;
+                btn.innerText = '🧠 Estivando...';
             }
-            alert(report.join('\n'));
+
+            const totalCargo = getAutoTotalCargo();
+            let best = null;
+            let executedAttempts = 0;
+            let lastYield = performance.now();
+
+            setAutoProgress(0, attempts, 0, totalCargo, 'Iniciando busca por melhor combinação...');
+            setAutoReport([`Testando ${attempts} possibilidade(s).`, 'O melhor plano encontrado será aplicado ao final.'], true);
+            await autoYield();
+
+            try {
+                for (let attempt = 0; attempt < attempts; attempt++) {
+                    const result = runSingleAutoAttempt(attempt);
+                    executedAttempts = attempt + 1;
+                    const previousBestPlaced = best ? best.placed : 0;
+                    const improvedBest = isBetterAutoResult(result, best);
+
+                    if (improvedBest) {
+                        best = result;
+                    }
+
+                    // Trava de melhor tentativa: uma tentativa pior nunca fica aplicada no estado do plano.
+                    // Depois de cada tentativa, voltamos imediatamente para o melhor snapshot já encontrado.
+                    applyBestAutoResultToState(best, false, false);
+
+                    const now = performance.now();
+                    const shouldUpdate = attempt === 0 || improvedBest || attempt === attempts - 1 || (attempt + 1) % 5 === 0 || (now - lastYield) > 120;
+                    if (shouldUpdate) {
+                        applyBestAutoResultToState(best, true, false);
+                        const detail = best && best.placed === totalCargo
+                            ? 'Plano completo encontrado. Finalizando...'
+                            : improvedBest
+                                ? `Nova melhor tentativa: ${best ? best.placed : 0}/${totalCargo}. A tela foi atualizada com ela.`
+                                : `Última tentativa descartada: ${result.placed}/${totalCargo}. Melhor mantido: ${best ? best.placed : 0}/${totalCargo}.`;
+                        setAutoProgress(attempt + 1, attempts, best ? best.placed : 0, totalCargo, detail);
+                        setAutoReport([
+                            `Tentativa atual: ${attempt + 1}/${attempts}`,
+                            `Melhor resultado mantido na tela: ${best ? best.placed : 0}/${totalCargo}`,
+                            improvedBest ? 'Última tentativa virou a nova melhor.' : `Última tentativa foi descartada: ${result.placed}/${totalCargo}`,
+                            previousBestPlaced > 0 ? `Melhor anterior: ${previousBestPlaced}/${totalCargo}` : 'Trava ativa: tentativas piores não substituem o melhor plano.'
+                        ], true);
+                        lastYield = now;
+                        await autoYield();
+                    }
+
+                    if (best && best.placed >= totalCargo) break;
+                }
+
+                if (best && best.savedShip) {
+                    applyBestAutoResultToState(best, true, true);
+                } else {
+                    clearAutoStowedCargoOnly();
+                    recalculateInventory();
+                    persistData();
+                    renderBayPairsUI();
+                }
+
+                const placed = best ? best.placed : 0;
+                const failureLines = best ? summarizeAutoFailures(best.failures) : [];
+                const report = [
+                    `Estivagem automática forte concluída.`,
+                    `Melhor resultado: ${placed}/${totalCargo}.`,
+                    `Tentativas executadas: ${executedAttempts}/${attempts}.`,
+                    ...failureLines.slice(0, 25)
+                ];
+                if (failureLines.length > 25) report.push(`... e mais ${failureLines.length - 25} grupos com sobra.`);
+                if (!failureLines.length && placed >= totalCargo) report.push('Todos os contêineres foram alocados.');
+
+                setAutoProgress(attempts, attempts, placed, totalCargo, placed >= totalCargo ? 'Plano completo encontrado.' : 'Busca encerrada com o melhor plano encontrado.');
+                setAutoReport(report, false);
+                alert(report.join('\n'));
+            } catch (err) {
+                console.error(err);
+                setAutoReport(['Erro durante a estivagem automática.', String(err && err.message ? err.message : err)], false);
+                alert('Erro durante a estivagem automática: ' + (err && err.message ? err.message : err));
+            } finally {
+                autoStowRunning = false;
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerText = '🧠 Estivar Automaticamente';
+                }
+            }
         }
 
         // --- EXPORTAR PDF ---
