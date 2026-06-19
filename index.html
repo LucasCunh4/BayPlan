@@ -3,12 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Stowage Auto - Tracking Manual</title>
+    <title>Stowage Plan Pro - Tracking Manual</title>
     
-    <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#1a2a3a">
-    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/1000/1000966.png">
-
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 
     <style>
@@ -146,6 +142,9 @@
         .action-btns { display: flex; gap: 8px; margin-top: 10px; }
         .btn-filter { flex: 1; background: #34495e; color: white; border: none; padding: 8px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 11px;}
         .btn-filter.active { background: #f39c12; }
+        .btn-auto-stow { width: 100%; background: #5cb85c; color: white; border: none; padding: 10px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 12px; margin-top: 10px; }
+        .btn-auto-stow:hover { background: #4cae4c; }
+        .auto-stow-report { display: none; margin-top: 10px; padding: 8px; background: #eefaf0; border: 1px solid #b7dfbd; color: #224422; border-radius: 4px; font-size: 11px; line-height: 1.35; max-height: 110px; overflow-y: auto; user-select: text; }
 
         /* PAINEL DE EXPANSÃO DA GRADE */
         .grid-edit-panel { background: #ffebee; border: 1px solid #ffcaca; border-radius: 6px; padding: 12px; margin-bottom: 15px; display: none; }
@@ -155,6 +154,19 @@
         .grid-edit-row span { font-size: 11px; font-weight: bold; color: #333; }
         .grid-edit-btns button { background: white; border: 1px solid #ccc; border-radius: 4px; padding: 2px 10px; cursor: pointer; font-weight: bold; font-size: 14px; }
         .grid-edit-btns button:hover { background: #eee; }
+
+        .separator-gap-controls { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+        .separator-gap-empty { font-size: 11px; color: #777; text-align: center; margin-top: 6px; }
+        .separator-editor-wrap { background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 10px; }
+        .separator-editor-track { position: relative; height: 40px; border: 1px solid #ccc; border-radius: 5px; background: linear-gradient(to right, #f8f8f8, #fff); overflow: visible; touch-action: none; }
+        .separator-editor-bar { position: absolute; top: 17px; height: 6px; background: #111; border-radius: 3px; }
+        .separator-editor-gap-preview { position: absolute; top: 14px; width: 8px; height: 12px; transform: translateX(-50%); background: #fff; border-left: 1px solid #999; border-right: 1px solid #999; pointer-events: none; z-index: 2; }
+        .separator-editor-handle { position: absolute; top: 7px; width: 16px; height: 26px; transform: translateX(-50%); border: 1px solid #b36b00; border-radius: 4px; background: #f39c12; cursor: ew-resize; z-index: 3; box-shadow: 0 1px 3px rgba(0,0,0,0.25); touch-action: none; }
+        .separator-editor-bound-handle { position: absolute; top: 2px; width: 18px; height: 36px; transform: translateX(-50%); border: 1px solid #263847; border-radius: 5px; background: #34495e; cursor: ew-resize; z-index: 4; box-shadow: 0 1px 3px rgba(0,0,0,0.28); touch-action: none; }
+        .separator-editor-bound-handle::after { content: '↔'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #fff; font-weight: bold; }
+        .separator-editor-handle::after { content: '↔'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #fff; font-weight: bold; }
+        .separator-editor-scale { display: flex; justify-content: space-between; font-size: 9px; color: #777; margin-top: 4px; }
+        .separator-editor-help { font-size: 10px; color: #555; text-align: center; margin-top: 6px; line-height: 1.25; }
 
         .inventory-container { flex: 1; overflow-y: auto; background: #fff; }
         .inventory-header { padding: 10px 15px; background: #1a2a3a; color: white; font-size: 12px; font-weight: bold; position: sticky; top: 0; z-index: 10; display:flex; justify-content: space-between; align-items:center;}
@@ -207,12 +219,18 @@
 
         /* TRAVAS DE ALINHAMENTO MATEMÁTICO */
         .axis-row { display: flex; margin-bottom: 0px; }
+        .roll-axis-row { display: flex; align-items: center; margin-bottom: 4px; margin-top: 4px; }
         .axis-col-labels { display: flex; border: none; }
+        .tier-title-spacer { visibility: hidden; pointer-events: none; }
         
         .axis-label { 
             width: var(--cell-size); 
-            min-width: var(--cell-size); 
-            flex-shrink: 0; 
+            min-width: var(--cell-size); /* Trava largura */
+            height: 16px;
+            flex-shrink: 0; /* Impede encolhimento */
+            display: flex;
+            align-items: center;
+            justify-content: center;
             text-align: center; 
             font-size: 11px; 
             font-weight: bold; 
@@ -222,7 +240,7 @@
         
         .row-label { 
             width: 24px; 
-            min-width: 24px; 
+            min-width: 24px; /* Trava largura */
             flex-shrink: 0; 
             display: flex; 
             align-items: center; 
@@ -234,12 +252,14 @@
             box-sizing: border-box; 
         }
         
-        .deck-separator { width: 100%; height: 6px; background-color: #111; margin: 6px 0; border-radius: 2px;}
+        .deck-separator { width: 100%; height: 8px; margin: 6px 0; position: relative; background: transparent; border-radius: 2px; overflow: visible; }
+        .deck-separator-line { position: absolute; top: 0; height: 8px; background: #111; border-radius: 2px; z-index: 1; }
+        .deck-separator-gap { position: absolute; top: -1px; width: 8px; height: 10px; transform: translateX(-50%); background: #fff; z-index: 2; }
         
         .grid-row { display: flex; }
         .cell {
             width: var(--cell-size); 
-            min-width: var(--cell-size); 
+            min-width: var(--cell-size); /* Trava largura */
             height: var(--cell-size); 
             flex-shrink: 0; 
             border: 1px solid var(--cell-border);
@@ -277,12 +297,18 @@
         /* "X" DE 40 PÉS */
         .layer.base-blocked40 { background-color: #ffffff !important; border: 1px solid #111; }
         .layer.base-blocked40::before { 
-            content: 'X'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); 
-            font-size: 26px; font-weight: normal; font-family: 'Segoe UI', Arial, sans-serif;
-            color: #666; z-index: 30; 
+            content: 'X'; 
+            position: absolute; 
+            top: 50%; left: 50%; 
+            transform: translate(-50%, -50%); 
+            font-size: 26px; 
+            font-weight: normal; 
+            font-family: 'Segoe UI', Arial, sans-serif;
+            color: #666; 
+            z-index: 30; 
         }
 
-        /* "⇄" BLOQUEIO DE BAY GÊMEA (IMO/REEFER/STD) */
+        /* "⇄" BLOQUEIO DE BAY GÊMEA (IMO/REEFER/STD) COM FILTRO */
         .layer.base-blocked_twin { background-color: rgba(0,0,0,0.1) !important; border: 1px solid #111; }
         .layer.base-blocked_twin::before { 
             content: '⇄'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); 
@@ -291,30 +317,42 @@
 
         /* ====== FLAT RACK, OW, OH, OL ====== */
         .layer.base-flatrack::before { 
-            content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 25%; 
+            content: ''; 
+            position: absolute; 
+            bottom: 0; left: 0; right: 0; height: 25%; 
             background: linear-gradient(to bottom right, transparent 48%, #111 50%) left / 40% 100% no-repeat, 
                         linear-gradient(#111, #111) right / 60% 100% no-repeat;
         }
 
         .layer.mod-oh { z-index: 25; }
         .layer.mod-oh::after { 
-            content: ''; position: absolute; top: -6px; left: 10%; right: 10%; height: 6px; 
+            content: ''; 
+            position: absolute; 
+            top: -6px; left: 10%; right: 10%; height: 6px; 
             border: 1.5px solid #111; border-bottom: none; border-radius: 20px 20px 0 0; 
         }
 
         .layer.mod-ow { z-index: 25; }
         .layer.mod-ow::before { 
-            content: ''; position: absolute; left: -6px; top: 10%; bottom: 10%; width: 6px; 
+            content: ''; 
+            position: absolute; 
+            left: -6px; top: 10%; bottom: 10%; width: 6px; 
             border: 1.5px solid #111; border-right: none; border-radius: 20px 0 0 20px; 
         }
         .layer.mod-ow::after { 
-            content: ''; position: absolute; right: -6px; top: 10%; bottom: 10%; width: 6px; 
+            content: ''; 
+            position: absolute; 
+            right: -6px; top: 10%; bottom: 10%; width: 6px; 
             border: 1.5px solid #111; border-left: none; border-radius: 0 20px 20px 0; 
         }
+        .layer.mod-ow.ow-left::after { display: none; }
+        .layer.mod-ow.ow-right::before { display: none; }
 
         .layer.mod-ol { z-index: 25; }
         .layer.mod-ol::after { 
-            content: ''; position: absolute; top: 0px; left: 10%; right: 10%; height: 6px; 
+            content: ''; 
+            position: absolute; 
+            top: 0px; left: 10%; right: 10%; height: 6px; 
             border: 1.5px solid #111; border-top: none; border-radius: 0 0 20px 20px; 
         }
 
@@ -353,7 +391,7 @@
 
         .pdf-page .bay-pair-wrapper { width: 100%; transform: scale(1.05); transform-origin: top center; }
         .pdf-page .cell { border: 1px solid #111 !important; }
-        .pdf-page .deck-separator { background-color: #000 !important; }
+        .pdf-page .deck-separator-line { background-color: #000 !important; }
         .pdf-page .bay-container { border: 2px solid #aaa !important; box-shadow: none !important;}
 
     </style>
@@ -368,14 +406,13 @@
 
     <div id="welcomeModal" class="modal-overlay">
         <div class="modal-content">
-            <h2>🚢 Stowage Plan Pro - Bem-vindo</h2>
+            <h2>🚢 Stowage Plan Pro - Espelhamento Físico</h2>
             <ul>
                 <li><strong style="color: #d9534f;">MUDE AS CORES (OBRIGATÓRIO):</strong> Vá na aba "1. Lista de Carga", logo abaixo, e altere a paleta de cores dos portos clicando nas caixas de cor.</li>
-                <li><strong>Auto-Estivagem (NOVO):</strong> Importe seu JSON e clique no botão roxo "Auto-Stow Inteligente" para preencher todos os seus Reefers, IMOs e containers Dry automaticamente respeitando as regras físicas (Pêndulo Simétrico, Gravidade, Apoio Sólido, LIFO e Sincronização de Bays Equivalentes).</li>
-                <li><strong>Sincronização de Bays:</strong> Se você alocar algo na Bay 33 REEFER, a mesma coordenada na Bay 33 (e vice-versa) ficará imediatamente bloqueada com o símbolo "⇄" para impedir sobreposição no mesmo espaço físico de aço.</li>
-                <li><strong>Exportar PDF:</strong> O sistema isola apenas os desenhos e gera um arquivo A4 Paisagem (Landscape) real sem cortes.</li>
+                <li><strong>Sincronia Total (Gêmeas):</strong> As plantas IMO, REEFER e Normal estão conectadas. Se você alocar, apagar ou alterar o formato de uma, as outras copiam automaticamente.</li>
+                <li><strong>Filtro Visual:</strong> Você tem liberdade de estivagem. A planta "33 Normal" mostrará tudo. Mas a planta "33 REEFER" só mostrará o desenho colorido se a carga for Reefer. Cargas que não pertencem àquela planta ficarão escondidas sob o símbolo de ocupação "⇄".</li>
             </ul>
-            <button id="closeModalBtn" class="btn-start">Entendido, vamos começar!</button>
+            <button id="closeModalBtn" class="btn-start" onclick="document.getElementById('welcomeModal').style.display='none'">Entendido, vamos começar!</button>
         </div>
     </div>
 
@@ -396,11 +433,11 @@
     <main>
         <section id="cargoView">
             <div class="cargo-header">
-                <h3 style="margin-bottom: 5px;">Tabela de Contêineres (Viagem 02 NB Carregada)</h3>
-                <p style="font-size: 13px; color: #555;">A lista padrão com Portos de Origem (POL) e Descarga (POD) já foi carregada.</p>
+                <h3 style="margin-bottom: 5px;">Tabela de Contêineres (Padrão TTM 2026 Carregado)</h3>
+                <p style="font-size: 13px; color: #555;">A lista padrão já foi carregada. Altere as cores dos portos conforme a instrução.</p>
                 
                 <div class="color-picker-group">
-                    <h4>Cores de Descarga (POD):</h4>
+                    <h4>Cores dos Portos:</h4>
                     <label class="color-picker-label">LB <input type="color" id="color-lb" value="#e60000"></label>
                     <label class="color-picker-label">LH <input type="color" id="color-lh" value="#0073e6"></label>
                     <label class="color-picker-label">BA <input type="color" id="color-ba" value="#8cd962"></label>
@@ -414,9 +451,8 @@
                 <table id="cargoTable">
                     <thead>
                         <tr>
-                            <th style="width: 70px;">POL</th>
-                            <th style="width: 70px;">POD</th>
-                            <th style="width: 60px;">Qtd</th>
+                            <th>Porto (POD)</th>
+                            <th style="width: 80px;">Qtd</th>
                             <th>Tamanho</th>
                             <th>Tipo Base</th>
                             <th>Modificadores (Acumulativos)</th>
@@ -432,8 +468,6 @@
                         <button class="btn-export" id="btnExportJson" style="padding: 8px 16px; border-radius: 4px; border: none; background: #3498db; color: white; font-weight: bold; cursor: pointer;">📥 Exportar JSON</button>
                         <button class="btn-add" id="btnImportJson" style="background: #f39c12;">📂 Importar JSON</button>
                         <input type="file" id="importJsonInput" accept=".json" style="display:none">
-                        
-                        <button id="btnAutoStow" style="background: #8e44ad; border: none; padding: 8px 16px; border-radius: 4px; color: white; font-weight: bold; cursor: pointer; transition: 0.2s;" onmouseover="this.style.background='#732d91'" onmouseout="this.style.background='#8e44ad'">🪄 Auto-Stow Inteligente</button>
                     </div>
                     <button class="btn-reset-data" id="btnResetData" title="Apaga todas as cargas salvas no navegador">⚠️ Resetar Dados LocalStorage</button>
                 </div>
@@ -475,6 +509,17 @@
                             <button id="btnAddTierBelow">+</button>
                         </div>
                     </div>
+
+                    <hr style="border: none; border-top: 1px solid #ffcaca; margin: 12px 0;">
+
+                    <div class="grid-edit-row">
+                        <span>Divisões arrastáveis da barra: <strong id="deckSeparatorCount">1</strong></span>
+                        <div class="grid-edit-btns">
+                            <button id="btnRemDeckSplit">-</button>
+                            <button id="btnAddDeckSplit">+</button>
+                        </div>
+                    </div>
+                    <div id="deckSeparatorGaps" class="separator-gap-controls"></div>
                 </div>
 
                 <div class="tool-section">
@@ -485,11 +530,13 @@
                         <button class="btn-filter" id="btnFilterIMO">🔍 Ver IMO</button>
                         <button class="btn-filter" id="btnFilterReefer">❄️ Ver Reefer</button>
                     </div>
+                    <button class="btn-auto-stow" id="btnAutoStow">⚙️ Estivar Automaticamente</button>
+                    <div id="autoStowReport" class="auto-stow-report"></div>
                 </div>
 
                 <div class="inventory-container">
                     <div class="inventory-header">
-                        <span>LISTA DE CARGA (POL > POD)</span>
+                        <span>LISTA DE CARGA (POD)</span>
                         <button class="btn-deselect" id="btnDeselect">Desmarcar</button>
                     </div>
                     <div id="inventoryList">
@@ -507,17 +554,25 @@
     <div id="printArea"></div>
 
     <script>
-               // --- 1. DEFINIÇÕES DA ESTRUTURA E TOPOLOGIA ---
+        // --- 1. DEFINIÇÕES DA ESTRUTURA E TOPOLOGIA ---
         const COLS_DEFAULT = ['12','10','08','06','04','02','00','01','03','05','07','09','11'];
         const ROWS_ABOVE_DEFAULT = ['92','90','88','86','84','82'];
         const ROWS_BELOW_DEFAULT = ['16','14','12','10','08','06','04','02'];
         
-        const BAY_PAIRS = [
+        const BASE_BAY_PAIRS = [
             ['01','03'], ['05','07'], ['09','11'], ['13','15'],
-            ['17','19'], ['21','23'], ['25','27'], ['33','35'], ['37','39'],
-            ['01 IMO','03 IMO'], ['05 IMO','07 IMO'],
-            ['17 REEFER','19 REEFER'], ['33 REEFER','35 REEFER'], ['37 REEFER','39 REEFER']
+            ['17','19'], ['21','23'], ['25','27'], ['33','35'], ['37','39']
         ];
+
+        const IMO_BAYS = ['01', '11'];
+        const REEFER_BAYS = ['35', '37', '39'];
+        const SPECIAL_VIEW_PAIRS = [
+            IMO_BAYS.map(b => `${b} IMO`),
+            ['35 REEFER', '37 REEFER'],
+            ['39 REEFER']
+        ];
+        const BAY_PAIRS = [...BASE_BAY_PAIRS, ...SPECIAL_VIEW_PAIRS];
+        const SPECIAL_BAY_IDS = new Set([...IMO_BAYS.map(b => `${b} IMO`), ...REEFER_BAYS.map(b => `${b} REEFER`)]);
 
         let shipTopology = {}; 
         let savedShip = {};    
@@ -532,80 +587,180 @@
 
         let globalInventory = [];
 
-        // --- 2. DADOS DA CARGA ATUALIZADOS ---
+        // --- MÉTODOS DE SUPORTE (GÊMEAS FÍSICAS) ---
+        function normalizeBayBase(bay) {
+            return String(parseInt(String(bay).replace(' IMO', '').replace(' REEFER', ''), 10)).padStart(2, '0');
+        }
+
+        function getAllActiveBayIds() {
+            return [...new Set(BAY_PAIRS.flat())];
+        }
+
+        function createDefaultBayGrid() {
+            return {
+                cols: [...COLS_DEFAULT],
+                rowsAbove: [...ROWS_ABOVE_DEFAULT],
+                rowsBelow: [...ROWS_BELOW_DEFAULT],
+                deckSeparator: { divisions: 1, positions: [], startPct: 0, endPct: 100 }
+            };
+        }
+
+        function getEvenDeckSeparatorPositions(divisions, startPct = 0, endPct = 100) {
+            let positions = [];
+            const start = parseFloat(startPct) || 0;
+            const end = parseFloat(endPct) || 100;
+            for (let i = 1; i < divisions; i++) positions.push(start + ((end - start) / divisions) * i);
+            return positions;
+        }
+
+        function normalizeDeckSeparatorPositions(cfg) {
+            const needed = Math.max(0, cfg.divisions - 1);
+            const minGap = 3;
+            const minBarWidth = Math.max(8, needed * minGap + 4);
+
+            cfg.startPct = Math.max(0, Math.min(92, parseFloat(cfg.startPct ?? 0)));
+            cfg.endPct = Math.max(8, Math.min(100, parseFloat(cfg.endPct ?? 100)));
+            if (cfg.endPct - cfg.startPct < minBarWidth) {
+                if (cfg.startPct + minBarWidth <= 100) cfg.endPct = cfg.startPct + minBarWidth;
+                else cfg.startPct = Math.max(0, cfg.endPct - minBarWidth);
+            }
+
+            if (!Array.isArray(cfg.positions)) cfg.positions = getEvenDeckSeparatorPositions(cfg.divisions, cfg.startPct, cfg.endPct);
+            cfg.positions = cfg.positions
+                .map(p => Math.max(cfg.startPct + 2, Math.min(cfg.endPct - 2, parseFloat(p) || 0)))
+                .sort((a, b) => a - b);
+
+            while (cfg.positions.length < needed) {
+                const bounds = [cfg.startPct, ...cfg.positions, cfg.endPct];
+                let bestIdx = 0;
+                let bestSize = -1;
+                for (let i = 0; i < bounds.length - 1; i++) {
+                    const size = bounds[i + 1] - bounds[i];
+                    if (size > bestSize) { bestSize = size; bestIdx = i; }
+                }
+                cfg.positions.push((bounds[bestIdx] + bounds[bestIdx + 1]) / 2);
+                cfg.positions.sort((a, b) => a - b);
+            }
+
+            if (cfg.positions.length > needed) cfg.positions.length = needed;
+
+            cfg.positions = cfg.positions.map((p, idx) => {
+                const min = idx === 0 ? cfg.startPct + 2 : cfg.positions[idx - 1] + minGap;
+                const max = idx === needed - 1 ? cfg.endPct - 2 : cfg.endPct - ((needed - idx - 1) * minGap) - 2;
+                return Math.max(min, Math.min(max, p));
+            });
+        }
+
+        function ensureDeckSeparatorConfig(grid) {
+            if (!grid.deckSeparator) grid.deckSeparator = { divisions: 1, positions: [], startPct: 0, endPct: 100 };
+            grid.deckSeparator.divisions = Math.max(1, parseInt(grid.deckSeparator.divisions) || 1);
+            if (grid.deckSeparator.startPct === undefined) grid.deckSeparator.startPct = 0;
+            if (grid.deckSeparator.endPct === undefined) grid.deckSeparator.endPct = 100;
+
+            // Compatibilidade com backups antigos que guardavam apenas os espaços em px.
+            if (!Array.isArray(grid.deckSeparator.positions)) {
+                grid.deckSeparator.positions = getEvenDeckSeparatorPositions(grid.deckSeparator.divisions, grid.deckSeparator.startPct, grid.deckSeparator.endPct);
+            }
+
+            normalizeDeckSeparatorPositions(grid.deckSeparator);
+        }
+
+        function ensureBayStorage(bayId) {
+            if (!bayGrids[bayId] || !bayGrids[bayId].cols) bayGrids[bayId] = createDefaultBayGrid();
+            ensureDeckSeparatorConfig(bayGrids[bayId]);
+
+            if (!shipTopology[bayId]) shipTopology[bayId] = {};
+            if (!savedShip[bayId]) savedShip[bayId] = {};
+
+            let allRows = [...bayGrids[bayId].rowsAbove, ...bayGrids[bayId].rowsBelow];
+            allRows.forEach(r => {
+                bayGrids[bayId].cols.forEach(c => {
+                    let coord = `${r}-${c}`;
+                    if (shipTopology[bayId][coord] === undefined) shipTopology[bayId][coord] = isCellHiddenDefault(bayId, r, c);
+                });
+            });
+        }
+
+        function removeObsoleteSpecialBays() {
+            Object.keys(bayGrids).forEach(b => {
+                if ((b.includes(' IMO') || b.includes(' REEFER')) && !SPECIAL_BAY_IDS.has(b)) {
+                    delete bayGrids[b];
+                    delete shipTopology[b];
+                    delete savedShip[b];
+                }
+            });
+        }
+
+        function getTwinBays(bay) {
+            let base = normalizeBayBase(bay);
+            let res = [base];
+            if (IMO_BAYS.includes(base) && bayGrids[`${base} IMO`]) res.push(`${base} IMO`);
+            if (REEFER_BAYS.includes(base) && bayGrids[`${base} REEFER`]) res.push(`${base} REEFER`);
+            return res; 
+        }
+
+        // --- 2. DADOS DA CARGA TTM 2026 ---
         const cargoData2026 = [
             { pol: 'RG', pod: 'TR', qty: 15, size: '20', base: 'dry', mods: [] },
-            { pol: 'RG', pod: 'VE', qty: 20, size: '20', base: 'dry', mods: [] },
-            { pol: 'RG', pod: 'TR', qty: 15, size: '40', base: 'dry', mods: ['hc'] },
+            { pol: 'RG', pod: 'VE', qty: 20, size: '20', base: 'dry', mods: [] },      
+            { pol: 'RG', pod: 'TR', qty: 15, size: '40', base: 'dry', mods: ['hc'] },  
             { pol: 'RG', pod: 'TR', qty: 30, size: '40', base: 'opentop', mods: [] },
             { pol: 'RG', pod: 'TR', qty: 20, size: '40', base: 'dry', mods: ['reefer', 'hc'] },
-            { pol: 'RG', pod: 'TR', qty: 4,  size: '20', base: 'opentop', mods: ['oh'] },
+            { pol: 'PG', pod: 'TR', qty: 4, size: '20', base: 'opentop', mods: ['oh'] },
             { pol: 'PG', pod: 'VE', qty: 20, size: '40', base: 'dry', mods: ['reefer', 'hc'] },
             { pol: 'PG', pod: 'VE', qty: 10, size: '20', base: 'dry', mods: [] },
-            { pol: 'PG', pod: 'BA', qty: 2,  size: '40', base: 'opentop', mods: ['hc'] },
+            { pol: 'PG', pod: 'BA', qty: 2, size: '40', base: 'opentop', mods: ['hc'] },
             { pol: 'PG', pod: 'VE', qty: 20, size: '20', base: 'dry', mods: [] },
             { pol: 'PG', pod: 'VE', qty: 30, size: '20', base: 'opentop', mods: [] },
-            { pol: 'PG', pod: 'VE', qty: 8,  size: '20', base: 'tank', mods: [] },
+            { pol: 'PG', pod: 'VE', qty: 8, size: '20', base: 'tank', mods: [] },
             { pol: 'PG', pod: 'VE', qty: 10, size: '40', base: 'flatrack', mods: ['empty'] },
-            { pol: 'PG', pod: 'VE', qty: 6,  size: '20', base: 'flatrack', mods: [] },
-            { pol: 'PG', pod: 'VE', qty: 2,  size: '20', base: 'flatrack', mods: ['oh'] },
-            { pol: 'PG', pod: 'VE', qty: 4,  size: '40', base: 'opentop', mods: ['oh', 'hc'] },
+            { pol: 'PG', pod: 'VE', qty: 6, size: '20', base: 'flatrack', mods: [] },
+            { pol: 'PG', pod: 'VE', qty: 2, size: '20', base: 'flatrack', mods: ['oh'] },
+            { pol: 'PG', pod: 'VE', qty: 4, size: '40', base: 'opentop', mods: ['oh', 'hc'] },
             { pol: 'PG', pod: 'VE', qty: 20, size: '20', base: 'dry', mods: [] },
-            { pol: 'ST', pod: 'NA', qty: 6,  size: '40', base: 'imo', mods: ['imo8', 'hc'] },
-            { pol: 'ST', pod: 'LH', qty: 6,  size: '40', base: 'imo', mods: ['imo5', 'hc'] },
+            { pol: 'PG', pod: 'NA', qty: 6, size: '40', base: 'imo', mods: ['imo8', 'hc'] }, 
+            { pol: 'PG', pod: 'LH', qty: 6, size: '40', base: 'imo', mods: ['imo5', 'hc'] }, 
             { pol: 'ST', pod: 'BA', qty: 20, size: '40', base: 'dry', mods: ['reefer', 'hc'] },
             { pol: 'ST', pod: 'LH', qty: 18, size: '40', base: 'dry', mods: [] },
-            { pol: 'ST', pod: 'LH', qty: 5,  size: '40', base: 'flatrack', mods: ['ow', 'oh'] },
+            { pol: 'ST', pod: 'LH', qty: 5, size: '40', base: 'flatrack', mods: ['ow', 'oh'] },
             { pol: 'ST', pod: 'VE', qty: 14, size: '20', base: 'dry', mods: [] },
             { pol: 'ST', pod: 'VE', qty: 15, size: '20', base: 'dry', mods: ['empty'] },
             { pol: 'ST', pod: 'NA', qty: 20, size: '40', base: 'dry', mods: ['empty'] },
-            { pol: 'ST', pod: 'NA', qty: 8,  size: '40', base: 'dry', mods: ['hc'] },
+            { pol: 'ST', pod: 'NA', qty: 8, size: '40', base: 'dry', mods: ['hc'] },
             { pol: 'RJ', pod: 'LB', qty: 10, size: '20', base: 'dry', mods: ['empty', 'hc'] },
             { pol: 'RJ', pod: 'LB', qty: 10, size: '20', base: 'platform', mods: ['empty'] },
             { pol: 'RJ', pod: 'LB', qty: 26, size: '40', base: 'dry', mods: ['hc'] },
             { pol: 'RJ', pod: 'LH', qty: 20, size: '40', base: 'dry', mods: ['reefer', 'hc'] },
             { pol: 'RJ', pod: 'LH', qty: 10, size: '45', base: 'dry', mods: ['hc'] },
             { pol: 'RJ', pod: 'NA', qty: 20, size: '40', base: 'dry', mods: [] },
-            { pol: 'RJ', pod: 'NA', qty: 2,  size: '40', base: 'flatrack', mods: ['ow', 'hc'] },
+            { pol: 'RJ', pod: 'NA', qty: 2, size: '40', base: 'flatrack', mods: ['ow', 'hc'] },
             { pol: 'RJ', pod: 'NA', qty: 18, size: '40', base: 'dry', mods: [] },
-            { pol: 'SU', pod: 'LB', qty: 5,  size: '40', base: 'flatrack', mods: ['ow', 'oh'] },
+            { pol: 'SU', pod: 'LB', qty: 5, size: '40', base: 'flatrack', mods: ['ow', 'oh'] },
             { pol: 'SU', pod: 'LB', qty: 26, size: '40', base: 'dry', mods: ['hc'] },
             { pol: 'SU', pod: 'NA', qty: 20, size: '40', base: 'dry', mods: ['reefer', 'hc'] },
-            { pol: 'SU', pod: 'BA', qty: 8,  size: '20', base: 'opentop', mods: [] },
+            { pol: 'SU', pod: 'BA', qty: 8, size: '20', base: 'opentop', mods: [] },
             { pol: 'SU', pod: 'LB', qty: 10, size: '40', base: 'dry', mods: ['reefer', 'hc'] },
             { pol: 'SU', pod: 'BA', qty: 10, size: '40', base: 'dry', mods: ['reefer', 'hc'] },
-            { pol: 'SU', pod: 'NA', qty: 2,  size: '40', base: 'platform', mods: ['ol'] },
+            { pol: 'SU', pod: 'NA', qty: 2, size: '40', base: 'platform', mods: ['ol'] },
             { pol: 'SU', pod: 'LH', qty: 16, size: '40', base: 'flatrack', mods: ['empty'] },
             { pol: 'SU', pod: 'LH', qty: 20, size: '40', base: 'dry', mods: ['reefer', 'hc'] },
-            { pol: 'SU', pod: 'LH', qty: 2,  size: '40', base: 'platform', mods: ['ol'] },
+            { pol: 'SU', pod: 'LH', qty: 2, size: '40', base: 'platform', mods: ['ol'] },
             { pol: 'SU', pod: 'LB', qty: 20, size: '20', base: 'dry', mods: [] },
-            { pol: 'SU', pod: 'LB', qty: 2,  size: '40', base: 'flatrack', mods: ['ow', 'oh'] },
+            { pol: 'SU', pod: 'LB', qty: 2, size: '40', base: 'flatrack', mods: ['ow', 'oh'] },
             { pol: 'SU', pod: 'LH', qty: 10, size: '40', base: 'dry', mods: ['reefer', 'hc'] },
-            { pol: 'PE', pod: 'LH', qty: 2,  size: '40', base: 'opentop', mods: ['oh', 'hc'] },
-            { pol: 'PE', pod: 'LB', qty: 2,  size: '40', base: 'flatrack', mods: ['ow'] },
+            { pol: 'PE', pod: 'LH', qty: 2, size: '40', base: 'opentop', mods: ['oh', 'hc'] },
+            { pol: 'PE', pod: 'LB', qty: 2, size: '40', base: 'flatrack', mods: ['ow'] },
             { pol: 'PE', pod: 'LB', qty: 10, size: '40', base: 'opentop', mods: ['oh'] },
             { pol: 'PE', pod: 'LH', qty: 20, size: '40', base: 'dry', mods: ['reefer', 'hc'] },
             { pol: 'PE', pod: 'LB', qty: 20, size: '40', base: 'dry', mods: ['empty', 'hc'] },
-            { pol: 'PE', pod: 'LB', qty: 10, size: '20', base: 'tank', mods: [] },
+            { pol: 'PE', pod: 'LB', qty: 10, size: '20', base: 'tank', mods: [] },       
             { pol: 'PE', pod: 'LB', qty: 10, size: '20', base: 'flatrack', mods: ['empty'] },
             { pol: 'PE', pod: 'LH', qty: 10, size: '45', base: 'dry', mods: ['hc'] }
         ];
 
-        // --- SISTEMA DE GÊMEAS (TWIN BAYS) ---
-        function getTwinBays(bay) {
-            let res = [bay];
-            if (bay.includes(' IMO')) res.push(bay.replace(' IMO', ''));
-            else if (bay.includes(' REEFER')) res.push(bay.replace(' REEFER', ''));
-            else {
-                if (bayGrids[`${bay} IMO`]) res.push(`${bay} IMO`);
-                if (bayGrids[`${bay} REEFER`]) res.push(`${bay} REEFER`);
-            }
-            return res;
-        }
-
         // --- SISTEMA DE SALVAMENTO LOCAL & JSON ---
         function persistData() {
-            const dataToSave = { version: 2, shipTopology, savedShip, globalInventory, bayGrids };
+            const dataToSave = { version: 5, shipTopology, savedShip, globalInventory, bayGrids };
             localStorage.setItem('stowagePlanData', JSON.stringify(dataToSave));
         }
 
@@ -614,45 +769,36 @@
             if (stored) {
                 try {
                     const parsed = JSON.parse(stored);
-                    if (parsed.version !== 2) return false; 
+                    if (![2, 3, 4, 5].includes(parsed.version)) return false; 
                     
                     shipTopology = parsed.shipTopology || {};
                     savedShip = parsed.savedShip || {};
                     globalInventory = parsed.globalInventory || [];
-                    
-                    globalInventory.forEach((inv, idx) => {
-                        if (!inv.pol && cargoData2026[idx]) inv.pol = cargoData2026[idx].pol;
-                        else if (!inv.pol) inv.pol = 'RG';
-                    });
-
                     bayGrids = parsed.bayGrids || {};
 
-                    BAY_PAIRS.forEach(pair => {
-                        pair.forEach(b => {
-                            if (!bayGrids[b] || !bayGrids[b].cols) {
-                                bayGrids[b] = { cols: [...COLS_DEFAULT], rowsAbove: [...ROWS_ABOVE_DEFAULT], rowsBelow: [...ROWS_BELOW_DEFAULT] };
-                            }
-                            if (!shipTopology[b]) {
-                                shipTopology[b] = {};
-                                let allR = [...bayGrids[b].rowsAbove, ...bayGrids[b].rowsBelow];
-                                allR.forEach(r => {
-                                    bayGrids[b].cols.forEach(c => { shipTopology[b][`${r}-${c}`] = isCellHiddenDefault(b, r, c); });
-                                });
-                            }
-                            if (!savedShip[b]) savedShip[b] = {};
-                        });
+                    removeObsoleteSpecialBays();
+
+                    // Auto-Cura de Topologia
+                    getAllActiveBayIds().forEach(b => ensureBayStorage(b));
+
+                    // Sincronia Retroativa de Gêmeas (Auto-heal de saves velhos)
+                    Object.keys(savedShip).forEach(bay => {
+                        let twins = getTwinBays(bay);
+                        if(twins.length > 1) {
+                            Object.keys(savedShip[bay]).forEach(coord => {
+                                twins.forEach(t => { if(!savedShip[t][coord]) savedShip[t][coord] = savedShip[bay][coord]; });
+                            });
+                        }
                     });
 
                     return true;
-                } catch(e) {
-                    return false;
-                }
+                } catch(e) { console.error("Erro ao carregar dados do LocalStorage", e); return false; }
             }
             return false;
         }
 
         function resetLocalData() {
-            if (confirm("Isso apagará todo o seu progresso local e carregará o navio vazio. Tem certeza?")) {
+            if (confirm("ATENÇÃO: Isso vai apagar todo o seu progresso salvo no navegador e carregar o navio vazio. Tem certeza?")) {
                 localStorage.removeItem('stowagePlanData');
                 location.reload();
             }
@@ -661,275 +807,33 @@
         function setupJsonExportImport() {
             document.getElementById('btnExportJson').addEventListener('click', () => {
                 const data = localStorage.getItem('stowagePlanData');
-                if(!data) { alert('Nenhum dado salvo para exportar.'); return; }
+                if(!data) { alert('Nenhum dado salvo localmente para exportar.'); return; }
                 const blob = new Blob([data], {type: 'application/json'});
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = 'stowage_plan_backup.json';
-                a.click();
-                URL.revokeObjectURL(url);
+                const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'stowage_plan_backup.json'; a.click(); URL.revokeObjectURL(url);
             });
 
-            document.getElementById('btnImportJson').addEventListener('click', () => {
-                document.getElementById('importJsonInput').click();
-            });
+            document.getElementById('btnImportJson').addEventListener('click', () => { document.getElementById('importJsonInput').click(); });
 
             document.getElementById('importJsonInput').addEventListener('change', (e) => {
-                const file = e.target.files[0];
-                if(!file) return;
+                const file = e.target.files[0]; if(!file) return;
                 const reader = new FileReader();
                 reader.onload = (ev) => {
                     try {
                         const parsed = JSON.parse(ev.target.result);
                         if(parsed.shipTopology && parsed.savedShip) {
-                            if(parsed.globalInventory) {
-                                parsed.globalInventory.forEach((inv, idx) => {
-                                    if(!inv.pol && cargoData2026[idx]) inv.pol = cargoData2026[idx].pol;
-                                    else if(!inv.pol) inv.pol = 'RG';
-                                });
-                            }
-                            localStorage.setItem('stowagePlanData', JSON.stringify(parsed));
-                            alert('Plano importado com sucesso!');
+                            localStorage.setItem('stowagePlanData', ev.target.result);
+                            alert('Plano importado com sucesso! A página será recarregada.');
                             location.reload();
-                        } else {
-                            alert('Arquivo JSON inválido.');
-                        }
-                    } catch(err) {
-                        alert('Erro ao ler o arquivo JSON.');
-                    }
-                };
-                reader.readAsText(file);
-            });
-        }
-
-        // --- SISTEMA DE AUTO-STOW OTIMIZADO (BIN-PACKING + TOP ONLY ISOLATION) ---
-        function setupAutoStow() {
-            document.getElementById('btnAutoStow').addEventListener('click', () => {
-                if(!confirm("Aplicar Otimização Bin-Packing? Contêineres de 40' entrarão primeiro, e Open Tops/OW serão forçados para o telhado do navio para economizar colunas. Continuar?")) return;
-
-                for(let bay in savedShip) { savedShip[bay] = {}; }
-                globalInventory.forEach(i => i.placed = 0);
-
-                const podWeight = { TR: 6, VE: 5, NA: 4, BA: 3, LH: 2, LB: 1 };
-                const polWeight = { RG: 1, PG: 2, ST: 3, RJ: 4, SU: 5, PE: 6 };
-
-                // ORDENAÇÃO MATADORA: LIFO PRIMEIRO -> DEPOIS BIN-PACKING (Grandes Primeiro)
-                let sortedInventory = [...globalInventory].sort((a,b) => {
-                    let podDiff = (podWeight[b.pod] || 0) - (podWeight[a.pod] || 0);
-                    if (podDiff !== 0) return podDiff; 
-                    
-                    let polDiff = (polWeight[a.pol] || 0) - (polWeight[b.pol] || 0);
-                    if (polDiff !== 0) return polDiff;
-
-                    let aIsBig = (a.size === '40' || a.size === '45' || a.mods.includes('ol')) ? 1 : 0;
-                    let bIsBig = (b.size === '40' || b.size === '45' || b.mods.includes('ol')) ? 1 : 0;
-                    return bIsBig - aIsBig;
-                });
-
-                let imos = sortedInventory.filter(i => i.base === 'imo' || i.mods.includes('imo5') || i.mods.includes('imo8'));
-                let reefers = sortedInventory.filter(i => !imos.includes(i) && (i.base === 'reefer' || i.mods.includes('reefer')));
-                let standards = sortedInventory.filter(i => !imos.includes(i) && !reefers.includes(i));
-
-                // ISOLAMENTO DE DESTRUIDORES DE ESPAÇO (Serão estivados por último e no convés)
-                let standardsTop = standards.filter(i => i.base === 'opentop' || i.mods.includes('oh') || i.mods.includes('ow'));
-                let standardsNormal = standards.filter(i => !standardsTop.includes(i));
-
-                let imoPairs = [['01 IMO','03 IMO'], ['05 IMO','07 IMO']];
-                let reeferPairs = [['17 REEFER','19 REEFER'], ['33 REEFER','35 REEFER'], ['37 REEFER','39 REEFER']];
-                let stdPairs = [['01','03'], ['05','07'], ['09','11'], ['13','15'], ['17','19'], ['21','23'], ['25','27'], ['33','35'], ['37','39']];
-
-                function getPendulum(cols) {
-                    let pairs = []; let center = null;
-                    cols.forEach(c => {
-                        if(c === '00') center = c;
-                        else if(parseInt(c) % 2 === 0) {
-                            let odd = String(parseInt(c)-1).padStart(2,'0');
-                            if(cols.includes(odd)) pairs.push([c, odd]);
-                            else pairs.push([c]);
-                        }
-                    });
-                    cols.forEach(c => {
-                        if(c !== '00' && parseInt(c) % 2 !== 0) {
-                            let even = String(parseInt(c)+1).padStart(2,'0');
-                            if(!cols.includes(even)) pairs.push([c]);
-                        }
-                    });
-                    pairs.sort(() => Math.random() - 0.5); 
-                    let res = [];
-                    pairs.forEach(p => {
-                        if(p.length === 2 && Math.random() > 0.5) res.push(p[1], p[0]);
-                        else res.push(...p);
-                    });
-                    if(center) res.push(center);
-                    return res;
-                }
-
-                function getAdjRolls(r) {
-                    if(r === '00') return ['01', '02'];
-                    if(r === '01') return ['00', '03'];
-                    if(r === '02') return ['00', '04'];
-                    let v = parseInt(r);
-                    return [String(v-2).padStart(2,'0'), String(v+2).padStart(2,'0')];
-                }
-
-                function getTiersAbove(grid, tier) {
-                    let all = [...grid.rowsBelow.slice().reverse(), ...grid.rowsAbove.slice().reverse()];
-                    let idx = all.indexOf(tier);
-                    return idx === -1 ? [] : all.slice(idx + 1);
-                }
-
-                function getTierBelow(grid, tier) {
-                    let idxB = grid.rowsBelow.indexOf(tier);
-                    if(idxB !== -1) return idxB < grid.rowsBelow.length - 1 ? grid.rowsBelow[idxB + 1] : null;
-                    let idxA = grid.rowsAbove.indexOf(tier);
-                    if(idxA !== -1) return idxA < grid.rowsAbove.length - 1 ? grid.rowsAbove[idxA + 1] : null;
-                    return null;
-                }
-
-                function allocate(items, pairsAllowed, preferDeck) {
-                    let pAllowed = [...pairsAllowed].sort(() => Math.random() - 0.5); 
-
-                    items.forEach(inv => {
-                        let remaining = inv.qty - inv.placed;
-                        if(remaining <= 0) return;
-
-                        let is40 = (inv.size === '40' || inv.size === '45' || inv.mods.includes('ol'));
-                        let isOW = inv.mods.includes('ow');
-                        let isOpenTop = (inv.base === 'opentop' || inv.mods.includes('oh'));
-
-                        for(let pair of pAllowed) {
-                            if(remaining <= 0) break;
-                            let b1 = pair[0]; let b2 = pair[1];
-                            let grid = bayGrids[b1];
-                            if(!grid || !shipTopology[b1] || !shipTopology[b2]) continue;
-
-                            let deckTiers = grid.rowsAbove.slice().reverse();
-                            let holdTiers = grid.rowsBelow.slice().reverse();
-                            let tiers = preferDeck ? [...deckTiers, ...holdTiers] : [...holdTiers, ...deckTiers];
-
-                            for (let t_row of tiers) {
-                                if(remaining <= 0) break;
-                                let pCols = getPendulum(grid.cols); 
-
-                                for(let c of pCols) {
-                                    if(remaining <= 0) break;
-                                    let coord = `${t_row}-${c}`;
-
-                                    let twinsB1 = getTwinBays(b1);
-                                    let twinsB2 = is40 ? getTwinBays(b2) : [];
-                                    let isFree = true;
-                                    
-                                    for(let tw of twinsB1) { 
-                                        if(shipTopology[tw][coord] !== false || (savedShip[tw][coord] && savedShip[tw][coord].base !== 'blocked_ow' && savedShip[tw][coord].base !== 'blocked_ot')) isFree = false; 
-                                    }
-                                    for(let tw of twinsB2) { 
-                                        if(shipTopology[tw][coord] !== false || (savedShip[tw][coord] && savedShip[tw][coord].base !== 'blocked_ow' && savedShip[tw][coord].base !== 'blocked_ot')) isFree = false; 
-                                    }
-                                    if(!isFree) continue;
-
-                                    let tierBelow = getTierBelow(grid, t_row);
-                                    if (tierBelow !== null) { 
-                                        let coordBelow = `${tierBelow}-${c}`;
-                                        
-                                        let hasPhysicalSupportB1 = false;
-                                        for(let tw of twinsB1) {
-                                            if (shipTopology[tw][coordBelow] !== false) hasPhysicalSupportB1 = true;
-                                            else if (savedShip[tw][coordBelow] && (savedShip[tw][coordBelow].invId || savedShip[tw][coordBelow].base === 'blocked40' || savedShip[tw][coordBelow].base === 'blocked_twin')) {
-                                                hasPhysicalSupportB1 = true;
-                                            }
-                                        }
-                                        if (!hasPhysicalSupportB1) isFree = false;
-
-                                        if (is40 && isFree) {
-                                            let hasPhysicalSupportB2 = false;
-                                            for(let tw of twinsB2) {
-                                                if (shipTopology[tw][coordBelow] !== false) hasPhysicalSupportB2 = true;
-                                                else if (savedShip[tw][coordBelow] && (savedShip[tw][coordBelow].invId || savedShip[tw][coordBelow].base === 'blocked40' || savedShip[tw][coordBelow].base === 'blocked_twin')) {
-                                                    hasPhysicalSupportB2 = true;
-                                                }
-                                            }
-                                            if (!hasPhysicalSupportB2) isFree = false;
-                                        }
-                                    }
-                                    if(!isFree) continue;
-
-                                    if (isOW) {
-                                        let adjs = getAdjRolls(c);
-                                        for(let a of adjs) {
-                                            for(let tw of twinsB1) {
-                                                if(shipTopology[tw][`${t_row}-${a}`] === false && savedShip[tw][`${t_row}-${a}`] && savedShip[tw][`${t_row}-${a}`].invId) isFree = false;
-                                            }
-                                            for(let tw of twinsB2) {
-                                                if(shipTopology[tw][`${t_row}-${a}`] === false && savedShip[tw][`${t_row}-${a}`] && savedShip[tw][`${t_row}-${a}`].invId) isFree = false;
-                                            }
-                                        }
-                                    }
-                                    if(!isFree) continue;
-
-                                    savedShip[b1][coord] = { invId: inv.id };
-                                    twinsB1.filter(tw => tw !== b1).forEach(tw => savedShip[tw][coord] = { base: 'blocked_twin' });
-
-                                    if (is40) {
-                                        savedShip[b2][coord] = { base: 'blocked40' };
-                                        twinsB2.filter(tw => tw !== b2).forEach(tw => savedShip[tw][coord] = { base: 'blocked_twin' });
-                                    }
-
-                                    if (isOW) {
-                                        let adjs = getAdjRolls(c);
-                                        adjs.forEach(a => {
-                                            twinsB1.forEach(tw => {
-                                                if(shipTopology[tw][`${t_row}-${a}`] === false && !savedShip[tw][`${t_row}-${a}`]) savedShip[tw][`${t_row}-${a}`] = { base: 'blocked_ow' };
-                                            });
-                                            twinsB2.forEach(tw => {
-                                                if(shipTopology[tw][`${t_row}-${a}`] === false && !savedShip[tw][`${t_row}-${a}`]) savedShip[tw][`${t_row}-${a}`] = { base: 'blocked_ow' };
-                                            });
-                                        });
-                                    }
-
-                                    if (isOpenTop) {
-                                        let above = getTiersAbove(grid, t_row);
-                                        above.forEach(at => {
-                                            twinsB1.forEach(tw => {
-                                                if(shipTopology[tw][`${at}-${c}`] === false && !savedShip[tw][`${at}-${c}`]) savedShip[tw][`${at}-${c}`] = { base: 'blocked_ot' };
-                                            });
-                                            twinsB2.forEach(tw => {
-                                                if(shipTopology[tw][`${at}-${c}`] === false && !savedShip[tw][`${at}-${c}`]) savedShip[tw][`${at}-${c}`] = { base: 'blocked_ot' };
-                                            });
-                                        });
-                                    }
-
-                                    inv.placed++;
-                                    remaining--;
-                                }
-                            }
-                        }
-                    });
-                }
-
-                allocate(imos, imoPairs, false);
-                allocate(reefers, reeferPairs, true);
-                allocate(standardsNormal, stdPairs, false);
-                allocate(standardsTop, stdPairs, true); // <--- OTIMIZAÇÃO APLICADA AQUI
-
-                recalculateInventory();
-                renderBayPairsUI();
-                persistData();
-                
-                let faltantes = globalInventory.filter(i => (i.qty - i.placed) > 0);
-                if(faltantes.length > 0) {
-                    alert(`Otimização concluída. Faltaram ${faltantes.length} lote(s) que não couberam dentro das restrições.`);
-                } else {
-                    alert("✅ Plano 100% estivado! Todos os espaços foram otimizados.");
-                }
+                        } else { alert('Arquivo JSON inválido para este aplicativo.'); }
+                    } catch(err) { alert('Erro ao ler o arquivo JSON.'); }
+                }; reader.readAsText(file);
             });
         }
 
         // --- 3. INICIALIZAÇÃO DA TOPOLOGIA PERFEITA ---
         function isCellHiddenDefault(bayId, row, col) {
             const b = parseInt(bayId); 
-            const rIdxA = ROWS_ABOVE_DEFAULT.indexOf(row);
-            const isAbove = rIdxA !== -1;
+            const rIdxA = ROWS_ABOVE_DEFAULT.indexOf(row); const isAbove = rIdxA !== -1;
             
             if (b === 1 || b === 3) {
                 if (isAbove) {
@@ -939,243 +843,341 @@
                 } else {
                     if (col === '00' || col === '12' || col === '11' || col === '10' || col === '09' || col === '08' || col === '07') return true;
                     if (row === '14' || row === '12') return false; 
-                    if (row === '10' || row === '08') {
-                        if (col === '06' || col === '05') return true;
-                        return false;
-                    }
-                    if (row === '06' || row === '04' || row === '02') {
-                        if (col === '06' || col === '05' || col === '04' || col === '03') return true;
-                        return false;
-                    }
+                    if (row === '10' || row === '08') { if (col === '06' || col === '05') return true; return false; }
+                    if (row === '06' || row === '04' || row === '02') { if (col === '06' || col === '05' || col === '04' || col === '03') return true; return false; }
                     return true;
                 }
             }
-
             if (b === 5 || b === 7) {
-                if (isAbove) {
-                    if (row === '92' || row === '90') return true;
-                    return false;
-                } else {
-                    if (row === '02') return true;
-                    if (col === '12' || col === '11' || col === '10' || col === '09') return true;
-                    if (row === '14' || row === '12') return false; 
-                    if (col === '08' || col === '06' || col === '05' || col === '07') return true;
-                    return false;
-                }
+                if (isAbove) { if (row === '92' || row === '90') return true; return false; } 
+                else { if (row === '02') return true; if (col === '12' || col === '11' || col === '10' || col === '09') return true; if (row === '14' || row === '12') return false; if (col === '08' || col === '06' || col === '05' || col === '07') return true; return false; }
             }
-
-            if (b >= 9 && b <= 15) {
-                if (isAbove) {
-                    if (row === '92' || row === '90') return true;
-                    return false;
-                } else {
-                    if (col === '00' || col === '12' || col === '11') return true;
-                    return false;
-                }
-            }
-
-            if (b === 17 || b === 19) {
-                if (isAbove) {
-                    if (row === '92') return true;
-                    if ((row === '90' || row === '88' || row === '86') && col === '00') return true;
-                    return false;
-                } else {
-                    if (col === '00' || col === '12' || col === '11') return true;
-                    return false;
-                }
-            }
-
-            if ((b >= 21 && b <= 27) || b === 33 || b === 35) {
-                if (isAbove) {
-                    if (row === '92') return true;
-                    return false;
-                } else {
-                    if (col === '00' || col === '12' || col === '11') return true;
-                    return false;
-                }
-            }
-
-            if (b === 37 || b === 39) {
-                if (isAbove) return false;
-                else return true;
-            }
-
+            if (b >= 9 && b <= 15) { if (isAbove) { if (row === '92' || row === '90') return true; return false; } else { if (col === '00' || col === '12' || col === '11') return true; return false; } }
+            if (b === 17 || b === 19) { if (isAbove) { if (row === '92') return true; if ((row === '90' || row === '88' || row === '86') && col === '00') return true; return false; } else { if (col === '00' || col === '12' || col === '11') return true; return false; } }
+            if ((b >= 21 && b <= 27) || b === 33 || b === 35) { if (isAbove) { if (row === '92') return true; return false; } else { if (col === '00' || col === '12' || col === '11') return true; return false; } }
+            if (b === 37 || b === 39) { if (!isAbove) return true; return false; }
             if (col === '00' && !isAbove) return true;
             return false;
         }
 
         function renameAxis(bayId, type, oldVal, el) {
             let newVal = el.innerText.replace(/[\n\r]/g, '').trim();
-            if (!newVal || newVal === oldVal) {
-                el.innerText = oldVal;
-                return;
-            }
+            if (!newVal || newVal === oldVal) { el.innerText = oldVal; return; }
 
-            let grid = bayGrids[bayId];
-            if (type === 'col') {
-                let idx = grid.cols.indexOf(oldVal);
-                if (idx !== -1) grid.cols[idx] = newVal;
-            } else if (type === 'row-above') {
-                let idx = grid.rowsAbove.indexOf(oldVal);
-                if (idx !== -1) grid.rowsAbove[idx] = newVal;
-            } else if (type === 'row-below') {
-                let idx = grid.rowsBelow.indexOf(oldVal);
-                if (idx !== -1) grid.rowsBelow[idx] = newVal;
-            }
+            getTwinBays(bayId).forEach(t => {
+                let grid = bayGrids[t];
+                if (type === 'col') { let idx = grid.cols.indexOf(oldVal); if (idx !== -1) grid.cols[idx] = newVal; } 
+                else if (type === 'row-above') { let idx = grid.rowsAbove.indexOf(oldVal); if (idx !== -1) grid.rowsAbove[idx] = newVal; } 
+                else if (type === 'row-below') { let idx = grid.rowsBelow.indexOf(oldVal); if (idx !== -1) grid.rowsBelow[idx] = newVal; }
 
-            let newTopology = {};
-            let newSavedShip = {};
-            
-            Object.keys(shipTopology[bayId]).forEach(coord => {
-                let [r, c] = coord.split('-');
-                let newR = (type.includes('row') && r === oldVal) ? newVal : r;
-                let newC = (type === 'col' && c === oldVal) ? newVal : c;
-                newTopology[`${newR}-${newC}`] = shipTopology[bayId][coord];
+                let newTopology = {}; let newSavedShip = {};
+                Object.keys(shipTopology[t]).forEach(coord => {
+                    let [r, c] = coord.split('-');
+                    let newR = (type.includes('row') && r === oldVal) ? newVal : r;
+                    let newC = (type === 'col' && c === oldVal) ? newVal : c;
+                    newTopology[`${newR}-${newC}`] = shipTopology[t][coord];
+                });
+                Object.keys(savedShip[t]).forEach(coord => {
+                    let [r, c] = coord.split('-');
+                    let newR = (type.includes('row') && r === oldVal) ? newVal : r;
+                    let newC = (type === 'col' && c === oldVal) ? newVal : c;
+                    newSavedShip[`${newR}-${newC}`] = savedShip[t][coord];
+                });
+                shipTopology[t] = newTopology; savedShip[t] = newSavedShip;
             });
-
-            Object.keys(savedShip[bayId]).forEach(coord => {
-                let [r, c] = coord.split('-');
-                let newR = (type.includes('row') && r === oldVal) ? newVal : r;
-                let newC = (type === 'col' && c === oldVal) ? newVal : c;
-                newSavedShip[`${newR}-${newC}`] = savedShip[bayId][coord];
-            });
-
-            shipTopology[bayId] = newTopology;
-            savedShip[bayId] = newSavedShip;
-            
-            persistData();
-            renderBayPairsUI();
+            persistData(); renderBayPairsUI();
         }
 
         function setupGridEditControls() {
             document.getElementById('btnToggleRoll00').addEventListener('click', () => {
                 let bayId = document.getElementById('editGridBaySelect').value;
-                let grid = bayGrids[bayId];
-
-                if (grid.cols.includes('00')) {
-                    grid.cols = grid.cols.filter(c => c !== '00');
-                } else {
-                    let insertIndex = grid.cols.findIndex(c => parseInt(c) % 2 !== 0);
-                    if (insertIndex === -1) {
-                        grid.cols.push('00');
-                    } else {
-                        grid.cols.splice(insertIndex, 0, '00');
+                getTwinBays(bayId).forEach(t => {
+                    let grid = bayGrids[t];
+                    if (grid.cols.includes('00')) { grid.cols = grid.cols.filter(c => c !== '00'); } 
+                    else {
+                        let insertIndex = grid.cols.findIndex(c => parseInt(c) % 2 !== 0);
+                        if (insertIndex === -1) { grid.cols.push('00'); } else { grid.cols.splice(insertIndex, 0, '00'); }
+                        [...grid.rowsAbove, ...grid.rowsBelow].forEach(r => { if (shipTopology[t][`${r}-00`] === undefined) shipTopology[t][`${r}-00`] = false; });
                     }
-                    
-                    let all_rows = [...grid.rowsAbove, ...grid.rowsBelow];
-                    all_rows.forEach(r => {
-                        if (shipTopology[bayId][`${r}-00`] === undefined) {
-                            shipTopology[bayId][`${r}-00`] = false;
-                        }
-                    });
-                }
-                persistData(); 
-                renderBayPairsUI();
+                });
+                persistData(); renderBayPairsUI();
             });
 
             document.getElementById('btnAddRoll').addEventListener('click', () => {
                 let bayId = document.getElementById('editGridBaySelect').value;
-                let grid = bayGrids[bayId];
-                let evens = grid.cols.filter(c => parseInt(c) % 2 === 0 && c !== '00').map(c => parseInt(c));
-                let nextEven = evens.length > 0 ? Math.max(...evens) + 2 : 2;
-                let odds = grid.cols.filter(c => parseInt(c) % 2 !== 0).map(c => parseInt(c));
-                let nextOdd = odds.length > 0 ? Math.max(...odds) + 2 : 1;
-                
-                grid.cols.unshift(String(nextEven).padStart(2, '0'));
-                grid.cols.push(String(nextOdd).padStart(2, '0'));
-                
-                let all_rows = [...grid.rowsAbove, ...grid.rowsBelow];
-                all_rows.forEach(r => {
-                    shipTopology[bayId][`${r}-${String(nextEven).padStart(2,'0')}`] = false;
-                    shipTopology[bayId][`${r}-${String(nextOdd).padStart(2,'0')}`] = false;
+                getTwinBays(bayId).forEach(t => {
+                    let grid = bayGrids[t];
+                    let evens = grid.cols.filter(c => parseInt(c) % 2 === 0 && c !== '00').map(c => parseInt(c)); let nextEven = evens.length > 0 ? Math.max(...evens) + 2 : 2;
+                    let odds = grid.cols.filter(c => parseInt(c) % 2 !== 0).map(c => parseInt(c)); let nextOdd = odds.length > 0 ? Math.max(...odds) + 2 : 1;
+                    grid.cols.unshift(String(nextEven).padStart(2, '0')); grid.cols.push(String(nextOdd).padStart(2, '0'));
+                    [...grid.rowsAbove, ...grid.rowsBelow].forEach(r => { shipTopology[t][`${r}-${String(nextEven).padStart(2,'0')}`] = false; shipTopology[t][`${r}-${String(nextOdd).padStart(2,'0')}`] = false; });
                 });
                 persistData(); renderBayPairsUI();
             });
 
             document.getElementById('btnRemRoll').addEventListener('click', () => {
                 let bayId = document.getElementById('editGridBaySelect').value;
-                let grid = bayGrids[bayId];
-                if(grid.cols.length <= 1) return;
-                grid.cols.shift(); grid.cols.pop();
+                getTwinBays(bayId).forEach(t => { let grid = bayGrids[t]; if(grid.cols.length > 1) { grid.cols.shift(); grid.cols.pop(); } });
                 persistData(); renderBayPairsUI();
             });
 
             document.getElementById('btnAddTierAbove').addEventListener('click', () => {
                 let bayId = document.getElementById('editGridBaySelect').value;
-                let grid = bayGrids[bayId];
-                let max = grid.rowsAbove.length > 0 ? Math.max(...grid.rowsAbove.map(r => parseInt(r))) : 80;
-                let next = max + 2;
-                grid.rowsAbove.unshift(String(next).padStart(2, '0'));
-                
-                grid.cols.forEach(c => {
-                    shipTopology[bayId][`${String(next).padStart(2, '0')}-${c}`] = false;
+                getTwinBays(bayId).forEach(t => {
+                    let grid = bayGrids[t]; let max = grid.rowsAbove.length > 0 ? Math.max(...grid.rowsAbove.map(r => parseInt(r))) : 80; let next = max + 2;
+                    grid.rowsAbove.unshift(String(next).padStart(2, '0')); grid.cols.forEach(c => { shipTopology[t][`${String(next).padStart(2, '0')}-${c}`] = false; });
                 });
                 persistData(); renderBayPairsUI();
             });
 
             document.getElementById('btnRemTierAbove').addEventListener('click', () => {
                 let bayId = document.getElementById('editGridBaySelect').value;
-                let grid = bayGrids[bayId];
-                if(grid.rowsAbove.length === 0) return;
-                grid.rowsAbove.shift();
+                getTwinBays(bayId).forEach(t => { let grid = bayGrids[t]; if(grid.rowsAbove.length > 0) grid.rowsAbove.shift(); });
                 persistData(); renderBayPairsUI();
             });
 
             document.getElementById('btnAddTierBelow').addEventListener('click', () => {
                 let bayId = document.getElementById('editGridBaySelect').value;
-                let grid = bayGrids[bayId];
-                let max = grid.rowsBelow.length > 0 ? Math.max(...grid.rowsBelow.map(r => parseInt(r))) : 0;
-                let next = max + 2;
-                grid.rowsBelow.unshift(String(next).padStart(2, '0'));
-                
-                grid.cols.forEach(c => {
-                    shipTopology[bayId][`${String(next).padStart(2, '0')}-${c}`] = false;
+                getTwinBays(bayId).forEach(t => {
+                    let grid = bayGrids[t]; let max = grid.rowsBelow.length > 0 ? Math.max(...grid.rowsBelow.map(r => parseInt(r))) : 0; let next = max + 2;
+                    grid.rowsBelow.unshift(String(next).padStart(2, '0')); grid.cols.forEach(c => { shipTopology[t][`${String(next).padStart(2, '0')}-${c}`] = false; });
                 });
                 persistData(); renderBayPairsUI();
             });
 
             document.getElementById('btnRemTierBelow').addEventListener('click', () => {
                 let bayId = document.getElementById('editGridBaySelect').value;
-                let grid = bayGrids[bayId];
-                if(grid.rowsBelow.length === 0) return;
-                grid.rowsBelow.shift(); 
+                getTwinBays(bayId).forEach(t => { let grid = bayGrids[t]; if(grid.rowsBelow.length > 0) grid.rowsBelow.shift(); });
                 persistData(); renderBayPairsUI();
+            });
+
+            document.getElementById('editGridBaySelect').addEventListener('change', updateDeckSeparatorGapControls);
+
+            document.getElementById('btnAddDeckSplit').addEventListener('click', () => {
+                let bayId = document.getElementById('editGridBaySelect').value;
+                updateDeckSeparatorDivisions(bayId, 1);
+            });
+
+            document.getElementById('btnRemDeckSplit').addEventListener('click', () => {
+                let bayId = document.getElementById('editGridBaySelect').value;
+                updateDeckSeparatorDivisions(bayId, -1);
             });
         }
 
-        function initApp() {
-            document.getElementById('closeModalBtn').addEventListener('click', () => {
-                document.getElementById('welcomeModal').style.display = 'none';
+        function updateDeckSeparatorDivisions(bayId, delta) {
+            getTwinBays(bayId).forEach(t => {
+                ensureDeckSeparatorConfig(bayGrids[t]);
+                let cfg = bayGrids[t].deckSeparator;
+
+                if (delta > 0) {
+                    cfg.divisions += 1;
+                    cfg.positions = getEvenDeckSeparatorPositions(cfg.divisions, cfg.startPct, cfg.endPct);
+                    normalizeDeckSeparatorPositions(cfg);
+                } else if (delta < 0 && cfg.divisions > 1) {
+                    cfg.divisions -= 1;
+                    cfg.positions = getEvenDeckSeparatorPositions(cfg.divisions, cfg.startPct, cfg.endPct);
+                    normalizeDeckSeparatorPositions(cfg);
+                }
             });
+            persistData();
+            updateDeckSeparatorGapControls();
+            renderBayPairsUI();
+        }
+
+        function clampDeckSeparatorPosition(bayId, idx, rawValue) {
+            ensureDeckSeparatorConfig(bayGrids[bayId]);
+            const cfg = bayGrids[bayId].deckSeparator;
+            const minGap = 3;
+            const min = idx === 0 ? cfg.startPct + 2 : cfg.positions[idx - 1] + minGap;
+            const max = idx === cfg.positions.length - 1 ? cfg.endPct - 2 : cfg.positions[idx + 1] - minGap;
+            return Math.max(min, Math.min(max, rawValue));
+        }
+
+        function setDeckSeparatorPosition(bayId, idx, value) {
+            const finalValue = clampDeckSeparatorPosition(bayId, idx, value);
+            getTwinBays(bayId).forEach(t => {
+                ensureDeckSeparatorConfig(bayGrids[t]);
+                bayGrids[t].deckSeparator.positions[idx] = finalValue;
+                normalizeDeckSeparatorPositions(bayGrids[t].deckSeparator);
+            });
+            return finalValue;
+        }
+
+        function clampDeckSeparatorBound(bayId, side, rawValue) {
+            ensureDeckSeparatorConfig(bayGrids[bayId]);
+            const cfg = bayGrids[bayId].deckSeparator;
+            const minBarWidth = Math.max(8, (cfg.divisions - 1) * 3 + 4);
+            let value = Math.max(0, Math.min(100, rawValue));
+
+            if (side === 'start') {
+                const firstLimit = cfg.positions.length ? cfg.positions[0] - 2 : cfg.endPct - minBarWidth;
+                return Math.max(0, Math.min(firstLimit, value));
+            }
+
+            const lastLimit = cfg.positions.length ? cfg.positions[cfg.positions.length - 1] + 2 : cfg.startPct + minBarWidth;
+            return Math.min(100, Math.max(lastLimit, value));
+        }
+
+        function setDeckSeparatorBound(bayId, side, value) {
+            const finalValue = clampDeckSeparatorBound(bayId, side, value);
+            getTwinBays(bayId).forEach(t => {
+                ensureDeckSeparatorConfig(bayGrids[t]);
+                if (side === 'start') bayGrids[t].deckSeparator.startPct = finalValue;
+                else bayGrids[t].deckSeparator.endPct = finalValue;
+                normalizeDeckSeparatorPositions(bayGrids[t].deckSeparator);
+            });
+            return finalValue;
+        }
+
+        function applyDeckSeparatorPositionsToVisibleBay(bayId) {
+            getTwinBays(bayId).forEach(t => {
+                if (!bayGrids[t]) return;
+                ensureDeckSeparatorConfig(bayGrids[t]);
+                const cfg = bayGrids[t].deckSeparator;
+                document.querySelectorAll(`.deck-separator[data-bay="${t}"]`).forEach(separator => {
+                    const lineEl = separator.querySelector('.deck-separator-line');
+                    if (lineEl) {
+                        lineEl.style.left = `${cfg.startPct}%`;
+                        lineEl.style.width = `${cfg.endPct - cfg.startPct}%`;
+                    }
+                    separator.querySelectorAll('.deck-separator-gap').forEach(gapEl => {
+                        const idx = parseInt(gapEl.getAttribute('data-split-idx'), 10);
+                        if (!Number.isNaN(idx) && cfg.positions[idx] !== undefined) gapEl.style.left = `${cfg.positions[idx]}%`;
+                    });
+                });
+            });
+        }
+
+        function setupDeckSeparatorDragHandlers(bayId) {
+            const track = document.getElementById('deckSeparatorEditorTrack');
+            if (!track) return;
+
+            const updateVisualEditor = () => {
+                ensureDeckSeparatorConfig(bayGrids[bayId]);
+                const cfg = bayGrids[bayId].deckSeparator;
+                const bar = track.querySelector('.separator-editor-bar');
+                if (bar) {
+                    bar.style.left = `${cfg.startPct}%`;
+                    bar.style.width = `${cfg.endPct - cfg.startPct}%`;
+                }
+                const startHandle = track.querySelector('[data-bound="start"]');
+                const endHandle = track.querySelector('[data-bound="end"]');
+                if (startHandle) startHandle.style.left = `${cfg.startPct}%`;
+                if (endHandle) endHandle.style.left = `${cfg.endPct}%`;
+                cfg.positions.forEach((pos, idx) => {
+                    track.querySelectorAll(`[data-split-idx="${idx}"]`).forEach(el => { el.style.left = `${pos}%`; });
+                });
+            };
+
+            const getPointerPct = (ev) => {
+                const rect = track.getBoundingClientRect();
+                if (!rect.width) return 0;
+                return ((ev.clientX - rect.left) / rect.width) * 100;
+            };
+
+            track.querySelectorAll('.separator-editor-bound-handle').forEach(handle => {
+                handle.addEventListener('pointerdown', (ev) => {
+                    ev.preventDefault();
+                    const side = handle.getAttribute('data-bound');
+                    handle.setPointerCapture(ev.pointerId);
+
+                    const move = (moveEv) => {
+                        setDeckSeparatorBound(bayId, side, getPointerPct(moveEv));
+                        updateVisualEditor();
+                        applyDeckSeparatorPositionsToVisibleBay(bayId);
+                    };
+
+                    const up = (upEv) => {
+                        try { handle.releasePointerCapture(upEv.pointerId); } catch(e) {}
+                        handle.removeEventListener('pointermove', move);
+                        handle.removeEventListener('pointerup', up);
+                        handle.removeEventListener('pointercancel', up);
+                        persistData();
+                    };
+
+                    handle.addEventListener('pointermove', move);
+                    handle.addEventListener('pointerup', up);
+                    handle.addEventListener('pointercancel', up);
+                });
+            });
+
+            track.querySelectorAll('.separator-editor-handle').forEach(handle => {
+                handle.addEventListener('pointerdown', (ev) => {
+                    ev.preventDefault();
+                    const idx = parseInt(handle.getAttribute('data-split-idx'), 10);
+                    handle.setPointerCapture(ev.pointerId);
+
+                    const move = (moveEv) => {
+                        setDeckSeparatorPosition(bayId, idx, getPointerPct(moveEv));
+                        updateVisualEditor();
+                        applyDeckSeparatorPositionsToVisibleBay(bayId);
+                    };
+
+                    const up = (upEv) => {
+                        try { handle.releasePointerCapture(upEv.pointerId); } catch(e) {}
+                        handle.removeEventListener('pointermove', move);
+                        handle.removeEventListener('pointerup', up);
+                        handle.removeEventListener('pointercancel', up);
+                        persistData();
+                    };
+
+                    handle.addEventListener('pointermove', move);
+                    handle.addEventListener('pointerup', up);
+                    handle.addEventListener('pointercancel', up);
+                });
+            });
+        }
+
+        function updateDeckSeparatorGapControls() {
+            const editSelect = document.getElementById('editGridBaySelect');
+            const gapsBox = document.getElementById('deckSeparatorGaps');
+            const countEl = document.getElementById('deckSeparatorCount');
+            if (!editSelect || !gapsBox || !countEl || !editSelect.value || !bayGrids[editSelect.value]) return;
+
+            const bayId = editSelect.value;
+            ensureDeckSeparatorConfig(bayGrids[bayId]);
+            const cfg = bayGrids[bayId].deckSeparator;
+            countEl.textContent = cfg.divisions;
+
+            const handlesHtml = cfg.positions.map((pos, idx) => `
+                <div class="separator-editor-gap-preview" data-split-idx="${idx}" style="left: ${pos}%;"></div>
+                <div class="separator-editor-handle" data-split-idx="${idx}" title="Arrastar divisão ${idx + 1}" style="left: ${pos}%;"></div>
+            `).join('');
+
+            gapsBox.innerHTML = `
+                <div class="separator-editor-wrap">
+                    <div class="separator-editor-track" id="deckSeparatorEditorTrack">
+                        <div class="separator-editor-bar" style="left: ${cfg.startPct}%; width: ${cfg.endPct - cfg.startPct}%;"></div>
+                        <div class="separator-editor-bound-handle" data-bound="start" title="Arrastar início da barra" style="left: ${cfg.startPct}%;"></div>
+                        <div class="separator-editor-bound-handle" data-bound="end" title="Arrastar fim da barra" style="left: ${cfg.endPct}%;"></div>
+                        ${handlesHtml}
+                    </div>
+                    <div class="separator-editor-scale"><span>Início</span><span>Centro</span><span>Fim</span></div>
+                    <div class="separator-editor-help">Arraste as alças escuras para encurtar ou alongar a barra. Arraste as alças laranjas para mover as divisões internas.</div>
+                </div>
+            `;
+
+            setupDeckSeparatorDragHandlers(bayId);
+        }
+
+        function initApp() {
             document.getElementById('btnResetData').addEventListener('click', resetLocalData);
 
             if (!loadPersistedData()) {
-                BAY_PAIRS.forEach(pair => {
-                    pair.forEach(b => {
-                        bayGrids[b] = { cols: [...COLS_DEFAULT], rowsAbove: [...ROWS_ABOVE_DEFAULT], rowsBelow: [...ROWS_BELOW_DEFAULT] };
-                        shipTopology[b] = {};
-                        savedShip[b] = {};
-                        let allR = [...ROWS_ABOVE_DEFAULT, ...ROWS_BELOW_DEFAULT];
-                        allR.forEach(r => {
-                            COLS_DEFAULT.forEach(c => {
-                                shipTopology[b][`${r}-${c}`] = isCellHiddenDefault(b, r, c);
-                            });
-                        });
-                    });
+                getAllActiveBayIds().forEach(b => {
+                    bayGrids[b] = createDefaultBayGrid();
+                    shipTopology[b] = {}; savedShip[b] = {};
+                    let allR = [...ROWS_ABOVE_DEFAULT, ...ROWS_BELOW_DEFAULT];
+                    allR.forEach(r => { COLS_DEFAULT.forEach(c => { shipTopology[b][`${r}-${c}`] = isCellHiddenDefault(b, r, c); }); });
                 });
                 load2026Data();
             } else {
-                document.getElementById('cargoTbody').innerHTML = '';
-                globalInventory.forEach(item => addCargoRow(item));
+                document.getElementById('cargoTbody').innerHTML = ''; globalInventory.forEach((item, idx) => { if (!item.pol && cargoData2026[idx] && cargoData2026[idx].pol) item.pol = cargoData2026[idx].pol; addCargoRow(item); });
             }
 
             ['lb', 'lh', 'ba', 'na', 've', 'tr'].forEach(port => {
                 const input = document.getElementById('color-' + port);
-                if(input) {
-                    input.addEventListener('input', (e) => {
-                        document.documentElement.style.setProperty(`--port-${port}`, e.target.value);
-                    });
-                }
+                if(input) { input.addEventListener('input', (e) => { document.documentElement.style.setProperty(`--port-${port}`, e.target.value); }); }
             });
 
             document.getElementById('tabCargo').addEventListener('click', () => switchTab('cargo'));
@@ -1184,290 +1186,246 @@
 
             const baySelect = document.getElementById('baySelect');
             BAY_PAIRS.forEach((pair, idx) => {
-                let opt = document.createElement('option');
-                opt.value = idx; 
-                opt.innerText = `Bays ${pair[0]} & ${pair[1]}`;
+                let opt = document.createElement('option'); opt.value = idx;
+                opt.innerText = pair.length > 1 ? `Bays ${pair.join(' & ')}` : `Bay ${pair[0]}`;
                 baySelect.appendChild(opt);
             });
             
-            baySelect.addEventListener('change', (e) => {
-                currentPairIdx = parseInt(e.target.value);
-                lastClickedCell = null;
-                renderBayPairsUI();
-            });
-
-            document.getElementById('btnDeselect').addEventListener('click', () => {
-                activeInvId = null;
-                renderInventoryPalette();
-            });
-
-            document.getElementById('toggleEditBtn').addEventListener('click', function() {
-                currentState.editMode = !currentState.editMode;
-                this.classList.toggle('active');
-                document.getElementById('canvasArea').classList.toggle('edit-mode-active');
-                document.getElementById('gridEditPanel').style.display = currentState.editMode ? 'block' : 'none';
-                lastClickedCell = null;
-                renderBayPairsUI(); 
-            });
-
-            document.getElementById('btnFilterIMO').addEventListener('click', function() {
-                this.classList.toggle('active');
-                document.getElementById('canvasArea').classList.toggle('filter-imo');
-            });
-            
-            document.getElementById('btnFilterReefer').addEventListener('click', function() {
-                this.classList.toggle('active');
-                document.getElementById('canvasArea').classList.toggle('filter-reefer');
-            });
-
+            baySelect.addEventListener('change', (e) => { currentPairIdx = parseInt(e.target.value); lastClickedCell = null; renderBayPairsUI(); });
+            document.getElementById('btnDeselect').addEventListener('click', () => { activeInvId = null; renderInventoryPalette(); });
+            document.getElementById('toggleEditBtn').addEventListener('click', function() { currentState.editMode = !currentState.editMode; this.classList.toggle('active'); document.getElementById('canvasArea').classList.toggle('edit-mode-active'); document.getElementById('gridEditPanel').style.display = currentState.editMode ? 'block' : 'none'; lastClickedCell = null; renderBayPairsUI(); });
+            document.getElementById('btnFilterIMO').addEventListener('click', function() { this.classList.toggle('active'); document.getElementById('canvasArea').classList.toggle('filter-imo'); });
+            document.getElementById('btnFilterReefer').addEventListener('click', function() { this.classList.toggle('active'); document.getElementById('canvasArea').classList.toggle('filter-reefer'); });
             document.getElementById('exportPdfBtn').addEventListener('click', generateRealPdf);
+            document.getElementById('btnAutoStow').addEventListener('click', runAutoStowage);
 
-            setupGridEditControls();
-            setupJsonExportImport();
-            setupAutoStow();
-            syncInventoryFromTable();
+            setupGridEditControls(); setupJsonExportImport(); syncInventoryFromTable();
             
-            if(localStorage.getItem('stowagePlanData') === null) {
-                document.getElementById('welcomeModal').style.display = 'flex';
-            } else {
-                document.getElementById('welcomeModal').style.display = 'none';
-            }
+            if(localStorage.getItem('stowagePlanData') === null) { document.getElementById('welcomeModal').style.display = 'flex'; } 
+            else { document.getElementById('welcomeModal').style.display = 'none'; }
         }
 
         function getSiblingBay(bayId) {
-            let pair = BAY_PAIRS[currentPairIdx];
-            if (pair[0] === bayId) return pair[1];
-            if (pair[1] === bayId) return pair[0];
-            return null;
+            let base = normalizeBayBase(bayId);
+            let physicalPair = BASE_BAY_PAIRS.find(pair => pair.includes(base));
+            if (!physicalPair) return null;
+            return physicalPair[0] === base ? physicalPair[1] : physicalPair[0];
         }
 
         function switchTab(tab) {
-            document.getElementById('tabCargo').classList.remove('active');
-            document.getElementById('tabManual').classList.remove('active');
-            document.getElementById('cargoView').style.display = 'none';
-            document.getElementById('manualView').style.display = 'none';
+            document.getElementById('tabCargo').classList.remove('active'); document.getElementById('tabManual').classList.remove('active');
+            document.getElementById('cargoView').style.display = 'none'; document.getElementById('manualView').style.display = 'none';
 
-            if(tab === 'cargo') {
-                document.getElementById('tabCargo').classList.add('active');
-                document.getElementById('cargoView').style.display = 'flex';
-                document.getElementById('toggleEditBtn').style.display = 'none';
-            } else {
-                document.getElementById('tabManual').classList.add('active');
-                document.getElementById('manualView').style.display = 'flex';
-                document.getElementById('toggleEditBtn').style.display = 'block';
-                syncInventoryFromTable(); 
-                renderBayPairsUI();
-            }
+            if(tab === 'cargo') { document.getElementById('tabCargo').classList.add('active'); document.getElementById('cargoView').style.display = 'flex'; document.getElementById('toggleEditBtn').style.display = 'none'; } 
+            else { document.getElementById('tabManual').classList.add('active'); document.getElementById('manualView').style.display = 'flex'; document.getElementById('toggleEditBtn').style.display = 'block'; syncInventoryFromTable(); renderBayPairsUI(); }
         }
 
-        // --- 4. FUNÇÕES DA TABELA DE CARGA ---
-        function generateId() {
-            return 'inv_' + Math.random().toString(36).substr(2, 9);
-        }
+        // --- 4. FUNÇÕES DA TABELA DE CARGA (INPUT) ---
+        function generateId() { return 'inv_' + Math.random().toString(36).substr(2, 9); }
 
         function addCargoRow(data = null) {
-            let tr = document.createElement('tr');
-            let id = data && data.id ? data.id : generateId();
-            tr.setAttribute('data-id', id);
-
-            let d_pol = data && data.pol ? data.pol : 'RG';
-            let d_pod = data && data.pod ? data.pod : 'TR';
-            let d_qty = data && data.qty ? data.qty : 10;
-            let d_size = data && data.size ? data.size : '20';
-            let d_base = data && data.base ? data.base : 'dry';
-            let d_mods = data && data.mods ? data.mods : [];
-
+            let tr = document.createElement('tr'); let id = data && data.id ? data.id : generateId(); tr.setAttribute('data-id', id); let d_pol = data && data.pol ? data.pol : ''; tr.setAttribute('data-pol', d_pol);
+            let d_pod = data ? data.pod : 'TR'; let d_qty = data ? data.qty : 10; let d_size = data ? data.size : '20'; let d_base = data ? data.base : 'dry'; let d_mods = data ? data.mods : [];
             const isChecked = (val) => d_mods.includes(val) ? 'checked' : '';
 
             tr.innerHTML = `
-                <td><select class="inp-pol" onchange="syncInventoryFromTable()">
-                    <option value="RG" ${d_pol==='RG'?'selected':''}>RG</option>
-                    <option value="PG" ${d_pol==='PG'?'selected':''}>PG</option>
-                    <option value="ST" ${d_pol==='ST'?'selected':''}>ST</option>
-                    <option value="RJ" ${d_pol==='RJ'?'selected':''}>RJ</option>
-                    <option value="SU" ${d_pol==='SU'?'selected':''}>SU</option>
-                    <option value="PE" ${d_pol==='PE'?'selected':''}>PE</option>
-                </select></td>
                 <td><select class="inp-pod" onchange="syncInventoryFromTable()">
-                    <option value="LB" ${d_pod==='LB'?'selected':''}>LB</option>
-                    <option value="LH" ${d_pod==='LH'?'selected':''}>LH</option>
-                    <option value="BA" ${d_pod==='BA'?'selected':''}>BA</option>
-                    <option value="NA" ${d_pod==='NA'?'selected':''}>NA</option>
-                    <option value="VE" ${d_pod==='VE'?'selected':''}>VE</option>
-                    <option value="TR" ${d_pod==='TR'?'selected':''}>TR</option>
+                    <option value="TR" ${d_pod==='TR'?'selected':''}>TR (Trieste)</option><option value="VE" ${d_pod==='VE'?'selected':''}>VE (Veneza)</option>
+                    <option value="NA" ${d_pod==='NA'?'selected':''}>NA (Napoles)</option><option value="BA" ${d_pod==='BA'?'selected':''}>BA (Barcelona)</option>
+                    <option value="LH" ${d_pod==='LH'?'selected':''}>LH (Le Havre)</option><option value="LB" ${d_pod==='LB'?'selected':''}>LB (Lisboa)</option>
                 </select></td>
                 <td><input type="number" class="inp-qty" value="${d_qty}" min="1" onchange="syncInventoryFromTable()"></td>
                 <td><select class="inp-size" onchange="syncInventoryFromTable()">
-                    <option value="20" ${d_size==='20'?'selected':''}>20'</option>
-                    <option value="40" ${d_size==='40'?'selected':''}>40'</option>
-                    <option value="45" ${d_size==='45'?'selected':''}>45'</option>
+                    <option value="20" ${d_size==='20'?'selected':''}>20'</option><option value="40" ${d_size==='40'?'selected':''}>40'</option><option value="45" ${d_size==='45'?'selected':''}>45'</option>
                 </select></td>
                 <td><select class="inp-base" onchange="syncInventoryFromTable()">
-                    <option value="dry" ${d_base==='dry'?'selected':''}>Dry Cargo</option>
-                    <option value="opentop" ${d_base==='opentop'?'selected':''}>Open Top</option>
-                    <option value="flatrack" ${d_base==='flatrack'?'selected':''}>Flat Rack</option>
-                    <option value="platform" ${d_base==='platform'?'selected':''}>Plataforma</option>
-                    <option value="oh40" ${d_base==='oh40'?'selected':''}>Over Hang 40'</option>
-                    <option value="oh45" ${d_base==='oh45'?'selected':''}>Over Hang 45'</option>
-                    <option value="imo" ${d_base==='imo'?'selected':''}>IMO Class</option>
-                    <option value="livestock" ${d_base==='livestock'?'selected':''}>Live Stock</option>
+                    <option value="dry" ${d_base==='dry'?'selected':''}>Dry Cargo</option><option value="opentop" ${d_base==='opentop'?'selected':''}>Open Top</option>
+                    <option value="flatrack" ${d_base==='flatrack'?'selected':''}>Flat Rack</option><option value="platform" ${d_base==='platform'?'selected':''}>Plataforma</option>
+                    <option value="oh40" ${d_base==='oh40'?'selected':''}>Over Hang 40'</option><option value="oh45" ${d_base==='oh45'?'selected':''}>Over Hang 45'</option>
+                    <option value="imo" ${d_base==='imo'?'selected':''}>IMO Class</option><option value="livestock" ${d_base==='livestock'?'selected':''}>Live Stock</option>
                     <option value="tank" ${d_base==='tank'?'selected':''}>Tank</option>
                 </select></td>
                 <td><div class="attr-checks" onchange="syncInventoryFromTable()">
-                    <label><input type="checkbox" value="hc" ${isChecked('hc')}>HC</label>
-                    <label><input type="checkbox" value="ow" ${isChecked('ow')}>OW</label>
-                    <label><input type="checkbox" value="oh" ${isChecked('oh')}>OH</label>
-                    <label><input type="checkbox" value="ol" ${isChecked('ol')}>OL</label>
-                    <label><input type="checkbox" value="empty" ${isChecked('empty')}>Empty (E)</label>
-                    <label><input type="checkbox" value="reefer" ${isChecked('reefer')}>Reefer (R)</label>
-                    <label><input type="checkbox" value="imo5" ${isChecked('imo5')}>IMO 5</label>
-                    <label><input type="checkbox" value="imo8" ${isChecked('imo8')}>IMO 8</label>
+                    <label><input type="checkbox" value="hc" ${isChecked('hc')}>HC</label><label><input type="checkbox" value="ow" ${isChecked('ow')}>OW</label>
+                    <label><input type="checkbox" value="oh" ${isChecked('oh')}>OH</label><label><input type="checkbox" value="ol" ${isChecked('ol')}>OL</label>
+                    <label><input type="checkbox" value="empty" ${isChecked('empty')}>Empty (E)</label><label><input type="checkbox" value="reefer" ${isChecked('reefer')}>Reefer (R)</label>
+                    <label><input type="checkbox" value="imo5" ${isChecked('imo5')}>IMO 5</label><label><input type="checkbox" value="imo8" ${isChecked('imo8')}>IMO 8</label>
                 </div></td>
                 <td><button class="btn-clear-row" onclick="this.closest('tr').remove(); syncInventoryFromTable();">X</button></td>
             `;
             document.getElementById('cargoTbody').appendChild(tr);
         }
 
-        function load2026Data() {
-            document.getElementById('cargoTbody').innerHTML = '';
-            cargoData2026.forEach(item => {
-                item.id = generateId(); 
-                addCargoRow(item);
-            });
-            syncInventoryFromTable();
-        }
+        function load2026Data() { document.getElementById('cargoTbody').innerHTML = ''; cargoData2026.forEach(item => { addCargoRow({ ...item, id: generateId() }); }); syncInventoryFromTable(); }
 
         function syncInventoryFromTable() {
-            let oldInventory = [...globalInventory];
-            globalInventory = [];
-            
-            document.querySelectorAll('#cargoTbody tr').forEach(row => {
-                let id = row.getAttribute('data-id');
-                let pol = row.querySelector('.inp-pol').value;
-                let pod = row.querySelector('.inp-pod').value;
-                let qty = parseInt(row.querySelector('.inp-qty').value) || 0;
-                let size = row.querySelector('.inp-size').value;
-                let base = row.querySelector('.inp-base').value;
-                let mods = [];
+            let oldInventory = [...globalInventory]; globalInventory = [];
+            document.querySelectorAll('#cargoTbody tr').forEach((row, idx) => {
+                let id = row.getAttribute('data-id'); let pol = row.getAttribute('data-pol') || (cargoData2026[idx] && cargoData2026[idx].pol) || ''; let pod = row.querySelector('.inp-pod').value; let qty = parseInt(row.querySelector('.inp-qty').value) || 0; let size = row.querySelector('.inp-size').value; let base = row.querySelector('.inp-base').value; let mods = [];
                 row.querySelectorAll('.attr-checks input:checked').forEach(cb => mods.push(cb.value));
-
-                let oldItem = oldInventory.find(i => i.id === id);
-                let placed = oldItem ? oldItem.placed : 0; 
-
+                let oldItem = oldInventory.find(i => i.id === id); let placed = oldItem ? oldItem.placed : 0; 
                 globalInventory.push({ id, pol, pod, qty, size, base, mods, placed });
             });
-            recalculateInventory(); 
-            persistData();
+            recalculateInventory(); persistData();
         }
 
         // --- 5. PALETA LATERAL ---
         function renderInventoryPalette() {
-            const list = document.getElementById('inventoryList');
-            list.innerHTML = '';
-            
+            const list = document.getElementById('inventoryList'); list.innerHTML = '';
             globalInventory.forEach(inv => {
-                let remaining = inv.qty - inv.placed;
-                let isComplete = remaining <= 0;
-                let isActive = activeInvId === inv.id;
-                
-                let bgColor = `var(--port-${inv.pod.toLowerCase()})`;
-                let layersHtml = '';
+                let remaining = inv.qty - inv.placed; let isComplete = remaining <= 0; let isActive = activeInvId === inv.id;
+                let bgColor = `var(--port-${inv.pod.toLowerCase()})`; let layersHtml = '';
                 if(inv.base && inv.base !== 'dry') layersHtml += `<div class="layer base-${inv.base}"></div>`;
                 inv.mods.forEach(m => layersHtml += `<div class="layer mod-${m}"></div>`);
 
-                let el = document.createElement('div');
-                el.className = `palette-item ${isActive ? 'active' : ''} ${isComplete ? 'complete' : ''}`;
-                
-                el.onclick = () => {
-                    if (!isComplete) {
-                        activeInvId = inv.id;
-                        renderInventoryPalette();
-                    } else if (isComplete && isActive) {
-                        activeInvId = null;
-                        renderInventoryPalette();
-                    }
-                };
+                let el = document.createElement('div'); el.className = `palette-item ${isActive ? 'active' : ''} ${isComplete ? 'complete' : ''}`;
+                el.onclick = () => { if (!isComplete) { activeInvId = inv.id; renderInventoryPalette(); } else if (isComplete && isActive) { activeInvId = null; renderInventoryPalette(); } };
                 
                 el.innerHTML = `
-                    <div class="palette-cell" style="background-color: ${bgColor};">
-                        <span class="palette-port" style="color: ${inv.base==='oh40' ? '#111' : '#000'}">${inv.pod}</span>
-                        ${layersHtml}
-                    </div>
-                    <div class="palette-info">
-                        <div class="palette-title">${inv.size}' ${inv.base.toUpperCase()}</div>
-                        <div class="palette-mods">${inv.pol} > ${inv.pod} | ${inv.mods.length ? inv.mods.join(', ').toUpperCase() : 'STD'}</div>
-                    </div>
-                    <div class="palette-counter ${isComplete ? 'zero' : ''}">
-                        ${remaining}
-                    </div>
+                    <div class="palette-cell" style="background-color: ${bgColor};"><span class="palette-port" style="color: ${inv.base==='oh40' ? '#111' : '#000'}">${inv.pod}</span>${layersHtml}</div>
+                    <div class="palette-info"><div class="palette-title">${inv.size}' ${inv.base.toUpperCase()}</div><div class="palette-mods">${inv.mods.length ? inv.mods.join(', ').toUpperCase() : 'STANDARD'}</div></div>
+                    <div class="palette-counter ${isComplete ? 'zero' : ''}">${remaining}</div>
                 `;
                 list.appendChild(el);
             });
-            
             let actItem = globalInventory.find(i => i.id === activeInvId);
-            if (actItem && (actItem.qty - actItem.placed) <= 0) {
-                activeInvId = null;
-                setTimeout(renderInventoryPalette, 10);
-            }
+            if (actItem && (actItem.qty - actItem.placed) <= 0) { activeInvId = null; setTimeout(renderInventoryPalette, 10); }
         }
 
+        // EVITA CONTAGEM DUPLA DAS GÊMEAS
         function recalculateInventory() {
             globalInventory.forEach(inv => inv.placed = 0);
+            let countedSlots = new Set();
             for (let bay in savedShip) {
+                let baseBay = bay.replace(' IMO', '').replace(' REEFER', '');
                 for (let coord in savedShip[bay]) {
                     let cell = savedShip[bay][coord];
-                    if (cell.invId !== undefined) {
-                        let inv = globalInventory.find(i => i.id === cell.invId);
-                        if(inv) inv.placed++;
-                        else delete savedShip[bay][coord]; 
+                    if (cell && cell.invId !== undefined) {
+                        let uniqueId = `${cell.invId}-${baseBay}-${coord}`;
+                        if (!countedSlots.has(uniqueId)) { countedSlots.add(uniqueId); let inv = globalInventory.find(i => i.id === cell.invId); if(inv) inv.placed++; }
                     }
                 }
             }
-            renderInventoryPalette();
-            persistData();
+            renderInventoryPalette(); persistData();
         }
 
         // --- 6. RENDERIZAÇÃO DAS BAYS ---
-        function getPortColorHex(portCode) {
-            let input = document.getElementById('color-' + portCode.toLowerCase());
-            return input ? input.value : '#ffffff';
+        function getPortColorHex(portCode) { let input = document.getElementById('color-' + portCode.toLowerCase()); return input ? input.value : '#ffffff'; }
+
+        function getAdjacentCol(bayId, col, side) {
+            let grid = bayGrids[bayId];
+            if (!grid) return null;
+            let idx = grid.cols.indexOf(col);
+            if (idx === -1) return null;
+            let adjIdx = side === 'left' ? idx - 1 : idx + 1;
+            return grid.cols[adjIdx] || null;
         }
 
-        function generatePairHtml(bay1, bay2, isPrint = false) {
-            let html = `
-            <div class="bay-pair-wrapper">
-                <div class="pair-container">
-                    ${generateBayGridHtml(bay1, isPrint)}
-                    ${generateBayGridHtml(bay2, isPrint)}
-                </div>
-            </div>
-            `;
+        function getCellDataAcrossTwins(bayId, coord) {
+            for (let t of getTwinBays(bayId)) {
+                if (savedShip[t] && savedShip[t][coord]) return savedShip[t][coord];
+            }
+            return null;
+        }
+
+        function getInventoryFromCellData(cellData) {
+            if (!cellData || cellData.invId === undefined) return null;
+            return globalInventory.find(i => i.id === cellData.invId) || null;
+        }
+
+        function getInventoryAtPosition(bayId, row, col) {
+            return getInventoryFromCellData(getCellDataAcrossTwins(bayId, `${row}-${col}`));
+        }
+
+        function isOwInventory(inv) {
+            return !!(inv && Array.isArray(inv.mods) && inv.mods.includes('ow'));
+        }
+
+        function isSideBlockedForOw(bayId, row, col, side) {
+            let adjCol = getAdjacentCol(bayId, col, side);
+            if (!adjCol) return true;
+
+            let coord = `${row}-${adjCol}`;
+            if (!shipTopology[bayId] || shipTopology[bayId][coord]) return true;
+            return !!getCellDataAcrossTwins(bayId, coord);
+        }
+
+        function getOwVisualClass(bayId, row, col) {
+            const leftBlocked = isSideBlockedForOw(bayId, row, col, 'left');
+            const rightBlocked = isSideBlockedForOw(bayId, row, col, 'right');
+
+            if (leftBlocked && !rightBlocked) return 'ow-right';
+            if (rightBlocked && !leftBlocked) return 'ow-left';
+            return 'ow-both';
+        }
+
+        function getContainerLayersHtml(inv, bayId = null, row = null, col = null) {
+            let html = '';
+            if(inv.base && inv.base !== 'dry') html += `<div class="layer base-${inv.base}"></div>`;
+            inv.mods.forEach(m => {
+                if (m === 'ow' && bayId && row && col) {
+                    html += `<div class="layer mod-ow ${getOwVisualClass(bayId, row, col)}"></div>`;
+                } else {
+                    html += `<div class="layer mod-${m}"></div>`;
+                }
+            });
             return html;
         }
 
+        function validateOwRulesForPlacement(bayId, row, col, inv, showAlert = true) {
+            if (isOwInventory(inv)) {
+                const leftBlocked = isSideBlockedForOw(bayId, row, col, 'left');
+                const rightBlocked = isSideBlockedForOw(bayId, row, col, 'right');
+
+                if (leftBlocked && rightBlocked) {
+                    if (showAlert) alert('Não pode colocar este OW aqui: ele ficaria sanduichado entre parede/contêiner dos dois lados.');
+                    return false;
+                }
+            }
+
+            const neighbors = [
+                { sideFromTarget: 'left', sideToCheckOnNeighbor: 'left' },
+                { sideFromTarget: 'right', sideToCheckOnNeighbor: 'right' }
+            ];
+
+            for (let n of neighbors) {
+                const adjCol = getAdjacentCol(bayId, col, n.sideFromTarget);
+                if (!adjCol) continue;
+
+                const neighborInv = getInventoryAtPosition(bayId, row, adjCol);
+                if (!isOwInventory(neighborInv)) continue;
+
+                if (isSideBlockedForOw(bayId, row, adjCol, n.sideToCheckOnNeighbor)) {
+                    if (showAlert) alert('Não pode colocar carga neste lado: isso deixaria o OW sanduichado entre dois contêineres/parede.');
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        function generateDeckSeparatorHtml(bayId) {
+            ensureDeckSeparatorConfig(bayGrids[bayId]);
+            const cfg = bayGrids[bayId].deckSeparator;
+            const splitGaps = cfg.positions.map((pos, idx) => `<div class="deck-separator-gap" data-split-idx="${idx}" style="left: ${pos}%;"></div>`).join('');
+            const lineStyle = `left: ${cfg.startPct}%; width: ${cfg.endPct - cfg.startPct}%;`;
+            return `<div class="deck-separator" data-bay="${bayId}"><div class="deck-separator-line" style="${lineStyle}"></div>${splitGaps}</div>`;
+        }
+
+        function generatePairHtml(bay1, bay2, isPrint = false) {
+            const bays = Array.isArray(bay1) ? bay1 : [bay1, bay2].filter(Boolean);
+            return `<div class="bay-pair-wrapper"><div class="pair-container">${bays.map(b => generateBayGridHtml(b, isPrint)).join('')}</div></div>`;
+        }
+
         function generateBayGridHtml(bayId, isPrint = false) {
-            let savedData = savedShip[bayId] || {};
-            let isEditable = currentState.editMode && !isPrint;
-            let bayGrid = bayGrids[bayId];
+            let savedData = savedShip[bayId] || {}; let isEditable = currentState.editMode && !isPrint; let bayGrid = bayGrids[bayId];
+            let bayHtml = `<div class="bay-container-wrapper" style="display: flex; flex-direction: column; align-items: center;"><h3 style="font-size: 24px; color: #111; margin: 0 0 10px 0; letter-spacing: 1px;">BAY ${bayId}</h3><div class="bay-container"><div class="axis-title">ROLL</div>`;
             
-            let bayHtml = `
-            <div class="bay-container-wrapper" style="display: flex; flex-direction: column; align-items: center;">
-                <h3 style="font-size: 24px; color: #111; margin: 0 0 10px 0; letter-spacing: 1px;">BAY ${bayId}</h3>
-                <div class="bay-container">
-                    <div class="axis-title">ROLL</div>
-            `;
-            
-            let colLabels = `<div class="axis-row" style="margin-bottom: 4px; margin-top: 4px;">`;
-            colLabels += `<div class="row-label" style="visibility: hidden; border: none; pointer-events: none;">00</div>`;
-            colLabels += `<div class="grid-row">`;
-            bayGrid.cols.forEach(c => {
-                colLabels += `<div class="axis-label" contenteditable="${isEditable ? 'true' : 'false'}" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" onblur="renameAxis('${bayId}', 'col', '${c}', this)">${c}</div>`;
-            });
+            let colLabels = `<div class="roll-axis-row"><div class="axis-title-tier tier-title-spacer">TIER</div><div class="row-label" style="visibility: hidden; border: none; pointer-events: none;">00</div><div class="grid-row">`;
+            bayGrid.cols.forEach(c => { colLabels += `<div class="axis-label" contenteditable="${isEditable ? 'true' : 'false'}" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" onblur="renameAxis('${bayId}', 'col', '${c}', this)">${c}</div>`; });
             colLabels += '</div></div>';
             
-            bayHtml += colLabels;
-
-            bayHtml += `<div class="bay-grid-flex"><div class="axis-title-tier">TIER</div><div>`;
+            bayHtml += colLabels + `<div class="bay-grid-flex"><div class="axis-title-tier">TIER</div><div>`;
 
             const drawRows = (rowsArray, typeStr) => {
                 let section = '';
@@ -1478,25 +1436,31 @@
                         let isHidden = shipTopology[bayId][coord] ? 'hidden' : '';
                         let cellData = savedData[coord];
                         
-                        let contentHtml = '';
-                        let bgColorStyle = isPrint ? 'background-color: #ffffff !important;' : 'background-color: var(--port-empty);';
+                        let contentHtml = ''; let bgColorStyle = isPrint ? 'background-color: #ffffff !important;' : 'background-color: var(--port-empty);';
 
                         if (cellData) {
                             if (cellData.base === 'blocked40') {
                                 contentHtml = `<div class="layer base-blocked40"></div>`;
-                            } else if (cellData.base === 'blocked_twin') {
-                                contentHtml = `<div class="layer base-blocked_twin" title="Ocupado na planta equivalente"></div>`;
-                            } else if (cellData.base === 'blocked_ow' || cellData.base === 'blocked_ot') {
-                                bgColorStyle = isPrint ? 'background-color: #ffffff !important;' : 'background-color: var(--port-empty);';
                             } else if (cellData.invId !== undefined) {
                                 let inv = globalInventory.find(i => i.id === cellData.invId);
                                 if(inv) {
-                                    let actualHex = getPortColorHex(inv.pod);
-                                    bgColorStyle = isPrint ? `background-color: ${actualHex} !important;` : `background-color: var(--port-${inv.pod.toLowerCase()});`;
-                                    
-                                    contentHtml += `<span class="port-text" style="color: ${inv.base==='oh40' ? '#111' : '#000'}">${inv.pod.toUpperCase()}</span>`;
-                                    if(inv.base && inv.base !== 'dry') contentHtml += `<div class="layer base-${inv.base}"></div>`;
-                                    inv.mods.forEach(m => contentHtml += `<div class="layer mod-${m}"></div>`);
+                                    // A MÁGICA DO FILTRO VISUAL PARA GÊMEAS FÍSICAS
+                                    let isImoContainer = inv.base === 'imo' || inv.mods.includes('imo5') || inv.mods.includes('imo8');
+                                    let isReeferContainer = inv.base === 'reefer' || inv.mods.includes('reefer');
+                                    let isImoBay = bayId.includes('IMO');
+                                    let isReeferBay = bayId.includes('REEFER');
+
+                                    if ((isImoBay && !isImoContainer) || (isReeferBay && !isReeferContainer)) {
+                                        // Ocupado na gêmea, mas não pertence a esta planta de visualização
+                                        contentHtml = `<div class="layer base-blocked_twin" title="Ocupado por carga diferente na planta Standard"></div>`;
+                                        bgColorStyle = isPrint ? 'background-color: #ffffff !important;' : 'background-color: var(--port-empty);';
+                                    } else {
+                                        // Pertence à planta, desenha normalmente
+                                        let actualHex = getPortColorHex(inv.pod);
+                                        bgColorStyle = isPrint ? `background-color: ${actualHex} !important;` : `background-color: var(--port-${inv.pod.toLowerCase()});`;
+                                        contentHtml += `<span class="port-text" style="color: ${inv.base==='oh40' ? '#111' : '#000'}">${inv.pod.toUpperCase()}</span>`;
+                                        contentHtml += getContainerLayersHtml(inv, bayId, row, col);
+                                    }
                                 }
                             }
                         }
@@ -1504,27 +1468,17 @@
                         let attrs = !isPrint ? `data-coord="${coord}" data-row="${row}" data-col="${col}" data-bay="${bayId}"` : '';
                         rowHtml += `<div class="cell ${isHidden}" ${attrs} style="${bgColorStyle}">${contentHtml}</div>`;
                     });
-                    rowHtml += `</div></div>`;
-                    section += rowHtml;
+                    rowHtml += `</div></div>`; section += rowHtml;
                 });
                 return section;
             };
 
-            bayHtml += drawRows(bayGrid.rowsAbove, 'row-above');
-            bayHtml += `<div class="deck-separator"></div>`;
-            bayHtml += drawRows(bayGrid.rowsBelow, 'row-below');
+            bayHtml += drawRows(bayGrid.rowsAbove, 'row-above'); bayHtml += generateDeckSeparatorHtml(bayId); bayHtml += drawRows(bayGrid.rowsBelow, 'row-below');
             
-            let colFooter = `<div class="axis-row" style="margin-bottom: 4px; margin-top: 4px;">`;
-            colFooter += `<div class="row-label" style="visibility: hidden; border: none; pointer-events: none;">00</div>`;
-            colFooter += `<div class="grid-row">`;
-            bayGrid.cols.forEach(c => {
-                colFooter += `<div class="axis-label" contenteditable="${isEditable ? 'true' : 'false'}" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" onblur="renameAxis('${bayId}', 'col', '${c}', this)">${c}</div>`;
-            });
+            let colFooter = `<div class="roll-axis-row"><div class="axis-title-tier tier-title-spacer">TIER</div><div class="row-label" style="visibility: hidden; border: none; pointer-events: none;">00</div><div class="grid-row">`;
+            bayGrid.cols.forEach(c => { colFooter += `<div class="axis-label" contenteditable="${isEditable ? 'true' : 'false'}" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" onblur="renameAxis('${bayId}', 'col', '${c}', this)">${c}</div>`; });
             colFooter += '</div></div>';
-            
-            bayHtml += `</div></div>`; 
-            bayHtml += colFooter;
-            bayHtml += `</div></div>`; 
+            bayHtml += `</div></div>${colFooter}</div></div>`; 
             
             return bayHtml;
         }
@@ -1532,161 +1486,440 @@
         function renderBayPairsUI() {
             const pair = BAY_PAIRS[currentPairIdx];
             const container = document.getElementById('pairContainer');
-            
             const editSelect = document.getElementById('editGridBaySelect');
             if(editSelect) {
                 const currentEditVal = editSelect.value;
-                editSelect.innerHTML = `<option value="${pair[0]}">Editar Bay ${pair[0]}</option><option value="${pair[1]}">Editar Bay ${pair[1]}</option>`;
+                editSelect.innerHTML = pair.map(b => `<option value="${b}">Editar Bay ${b}</option>`).join('');
                 if (pair.includes(currentEditVal)) editSelect.value = currentEditVal;
+                updateDeckSeparatorGapControls();
             }
-
             container.innerHTML = generatePairHtml(pair[0], pair[1], false);
             attachCellListeners();
         }
 
-        // --- EXPORTAR PDF ---
-        async function generateRealPdf() {
-            const loadingOverlay = document.getElementById('pdfLoadingOverlay');
-            const printArea = document.getElementById('printArea');
-            const mainEl = document.querySelector('main');
-            const headerEl = document.querySelector('header');
-            
-            loadingOverlay.style.display = 'flex';
-            printArea.innerHTML = ''; 
-            
-            let fullHtml = '';
-            BAY_PAIRS.forEach(pair => {
-                fullHtml += `<div class="pdf-page">`;
-                fullHtml += generatePairHtml(pair[0], pair[1], true);
-                fullHtml += `</div>`;
-            });
-            
-            printArea.innerHTML = fullHtml;
+        // --- 6B. ESTIVAGEM AUTOMÁTICA ---
+        const POL_ORDER = ['RG', 'PG', 'ST', 'RJ', 'SU', 'PE'];
+        const POD_ORDER = ['LB', 'LH', 'BA', 'NA', 'VE', 'TR'];
 
-            headerEl.style.display = 'none';
-            mainEl.style.display = 'none';
-            printArea.style.display = 'block';
-
-            await new Promise(r => setTimeout(r, 500));
-
-            const opt = {
-                margin:       0,
-                filename:     'BayPlan_Azimuth_2026.pdf',
-                image:        { type: 'jpeg', quality: 1 },
-                html2canvas:  { scale: 2, useCORS: true, backgroundColor: '#ffffff', scrollY: 0, windowWidth: document.documentElement.offsetWidth },
-                jsPDF:        { unit: 'mm', format: 'a4', orientation: 'landscape' }
-            };
-
-            try {
-                await html2pdf().set(opt).from(printArea).save();
-            } catch(e) {
-                alert("Houve um erro ao gerar o PDF. " + e);
-            }
-
-            printArea.style.display = 'none';
-            printArea.innerHTML = ''; 
-            headerEl.style.display = 'flex';
-            mainEl.style.display = 'flex';
-            loadingOverlay.style.display = 'none';
+        function getOrderIndex(list, value) {
+            let idx = list.indexOf(value);
+            return idx === -1 ? 999 : idx;
         }
 
-        // --- 7. LÓGICA DE CLIQUE E SHIFT (Com Sincronia de Gêmeas) ---
+        function isReeferInventory(inv) {
+            return !!(inv && Array.isArray(inv.mods) && inv.mods.includes('reefer'));
+        }
+
+        function isImoInventory(inv) {
+            return !!(inv && (inv.base === 'imo' || (Array.isArray(inv.mods) && (inv.mods.includes('imo5') || inv.mods.includes('imo8')))));
+        }
+
+        function hasMod(inv, mod) {
+            return !!(inv && Array.isArray(inv.mods) && inv.mods.includes(mod));
+        }
+
+        function isEmptyInventory(inv) {
+            return hasMod(inv, 'empty');
+        }
+
+        function isTankInventory(inv) {
+            return inv && inv.base === 'tank';
+        }
+
+        function isDeckRow(bayId, row) {
+            return !!(bayGrids[bayId] && bayGrids[bayId].rowsAbove.includes(row));
+        }
+
+        function isHoldRow(bayId, row) {
+            return !!(bayGrids[bayId] && bayGrids[bayId].rowsBelow.includes(row));
+        }
+
+        function getRowsOfSameSection(bayId, row) {
+            if (!bayGrids[bayId]) return [];
+            if (bayGrids[bayId].rowsAbove.includes(row)) return bayGrids[bayId].rowsAbove;
+            if (bayGrids[bayId].rowsBelow.includes(row)) return bayGrids[bayId].rowsBelow;
+            return [];
+        }
+
+        function getRowBelow(bayId, row) {
+            const rows = getRowsOfSameSection(bayId, row);
+            const idx = rows.indexOf(row);
+            if (idx === -1 || idx === rows.length - 1) return null;
+            return rows[idx + 1];
+        }
+
+        function getRowAbove(bayId, row) {
+            const rows = getRowsOfSameSection(bayId, row);
+            const idx = rows.indexOf(row);
+            if (idx <= 0) return null;
+            return rows[idx - 1];
+        }
+
+        function getVerticalLevelFromBottom(bayId, row) {
+            const rows = getRowsOfSameSection(bayId, row);
+            const idx = rows.indexOf(row);
+            if (idx === -1) return 0;
+            return rows.length - 1 - idx;
+        }
+
+        function getColumnCenterDistance(bayId, col) {
+            const grid = bayGrids[bayId];
+            if (!grid) return 0;
+            const idx = grid.cols.indexOf(col);
+            if (idx === -1) return 0;
+            return Math.abs(idx - ((grid.cols.length - 1) / 2));
+        }
+
+        function getPhysicalFootprintBays(bayId, inv) {
+            const base = normalizeBayBase(bayId);
+            let bays = [base];
+            if (inv && (inv.size === '40' || inv.size === '45' || hasMod(inv, 'ol'))) {
+                const sibling = getSiblingBay(base);
+                if (sibling) bays.push(sibling);
+            }
+            return [...new Set(bays)];
+        }
+
+        function getAllowedAutoBays(inv) {
+            if (isImoInventory(inv)) {
+                if (inv.pod === 'NA') return ['01'];
+                if (inv.pod === 'LH') return ['11'];
+                return [];
+            }
+            if (isReeferInventory(inv)) return [...REEFER_BAYS];
+            return BASE_BAY_PAIRS.flat();
+        }
+
+        function getActualInventoryAtPhysicalPosition(bayId, row, col) {
+            const base = normalizeBayBase(bayId);
+            const coord = `${row}-${col}`;
+
+            for (let t of getTwinBays(base)) {
+                const cell = savedShip[t] && savedShip[t][coord];
+                if (cell && cell.invId !== undefined) return globalInventory.find(i => i.id === cell.invId) || null;
+            }
+
+            const direct = savedShip[base] && savedShip[base][coord];
+            if (direct && direct.invId !== undefined) return globalInventory.find(i => i.id === direct.invId) || null;
+
+            const sibling = getSiblingBay(base);
+            if (sibling) {
+                for (let t of getTwinBays(sibling)) {
+                    const cell = savedShip[t] && savedShip[t][coord];
+                    if (cell && cell.invId !== undefined) return globalInventory.find(i => i.id === cell.invId) || null;
+                }
+            }
+            return null;
+        }
+
+        function isPhysicalPositionOccupied(bayId, row, col) {
+            const coord = `${row}-${col}`;
+            for (let t of getTwinBays(bayId)) {
+                if (savedShip[t] && savedShip[t][coord]) return true;
+            }
+            return false;
+        }
+
+        function isPhysicalPositionAvailable(bayId, row, col) {
+            const coord = `${row}-${col}`;
+            if (!bayGrids[bayId] || !bayGrids[bayId].cols.includes(col)) return false;
+            if (!shipTopology[bayId] || shipTopology[bayId][coord]) return false;
+            return !isPhysicalPositionOccupied(bayId, row, col);
+        }
+
+        function isStackPairCompatible(topInv, bottomInv) {
+            if (!topInv || !bottomInv) return true;
+            const topPol = getOrderIndex(POL_ORDER, topInv.pol);
+            const bottomPol = getOrderIndex(POL_ORDER, bottomInv.pol);
+            const topPod = getOrderIndex(POD_ORDER, topInv.pod);
+            const bottomPod = getOrderIndex(POD_ORDER, bottomInv.pod);
+            return topPol >= bottomPol && topPod <= bottomPod;
+        }
+
+        function hasOhAtPosition(bayId, row, col) {
+            const inv = getActualInventoryAtPhysicalPosition(bayId, row, col);
+            return hasMod(inv, 'oh') || inv?.base === 'oh40' || inv?.base === 'oh45';
+        }
+
+        function hasContainerAbove(bayId, row, col) {
+            const above = getRowAbove(bayId, row);
+            return above ? isPhysicalPositionOccupied(bayId, above, col) : false;
+        }
+
+        function getBelowInventoriesForFootprint(bayId, row, col, inv) {
+            const below = getRowBelow(bayId, row);
+            if (!below) return [];
+            return getPhysicalFootprintBays(bayId, inv).map(b => getActualInventoryAtPhysicalPosition(b, below, col)).filter(Boolean);
+        }
+
+        function validateAutoPlacement(inv, bayId, row, col) {
+            if (!inv || !inv.pol) return { ok: false, reason: 'sem POL interno' };
+            const bay = normalizeBayBase(bayId);
+            const coord = `${row}-${col}`;
+            const footprintBays = getPhysicalFootprintBays(bay, inv);
+
+            if (isImoInventory(inv)) {
+                if (!isDeckRow(bay, row)) return { ok: false, reason: 'IMO só pode ir no convés' };
+                if ((inv.pod === 'NA' && bay !== '01') || (inv.pod === 'LH' && bay !== '11')) return { ok: false, reason: 'IMO fora da bay correta' };
+            }
+
+            if (isReeferInventory(inv) && !REEFER_BAYS.includes(bay)) return { ok: false, reason: 'reefer fora de bay reefer' };
+
+            for (let b of footprintBays) {
+                if (!isPhysicalPositionAvailable(b, row, col)) return { ok: false, reason: 'posição ocupada/oculta' };
+            }
+
+            if (!validateOwRulesForPlacement(bay, row, col, inv, false)) return { ok: false, reason: 'OW sanduichado' };
+            for (let b of footprintBays) {
+                if (!validateOwRulesForPlacement(b, row, col, inv, false)) return { ok: false, reason: 'OW sanduichado' };
+            }
+
+            const below = getRowBelow(bay, row);
+            const above = getRowAbove(bay, row);
+
+            if (below) {
+                for (let b of footprintBays) {
+                    if (!isPhysicalPositionOccupied(b, below, col)) return { ok: false, reason: 'contêiner voando' };
+                }
+            }
+
+            if (hasMod(inv, 'oh') || inv.base === 'oh40' || inv.base === 'oh45') {
+                for (let b of footprintBays) {
+                    if (above && isPhysicalPositionOccupied(b, above, col)) return { ok: false, reason: 'OH com contêiner acima' };
+                }
+            }
+
+            if (below) {
+                for (let b of footprintBays) {
+                    if (hasOhAtPosition(b, below, col)) return { ok: false, reason: 'posição acima de OH' };
+                }
+            }
+
+            const belowInventories = getBelowInventoriesForFootprint(bay, row, col, inv);
+            for (let belowInv of belowInventories) {
+                if (inv.size === '20' && (belowInv.size === '40' || belowInv.size === '45')) return { ok: false, reason: "20' sobre 40'/45'" };
+                if (!isStackPairCompatible(inv, belowInv)) return { ok: false, reason: 'POL/POD incompatível com a pilha' };
+            }
+
+            if (above) {
+                for (let b of footprintBays) {
+                    const aboveInv = getActualInventoryAtPhysicalPosition(b, above, col);
+                    if (!aboveInv) continue;
+                    if (aboveInv.size === '20' && (inv.size === '40' || inv.size === '45')) return { ok: false, reason: "criaria 20' sobre 40'/45'" };
+                    if (!isStackPairCompatible(aboveInv, inv)) return { ok: false, reason: 'POL/POD incompatível com contêiner acima' };
+                }
+            }
+
+            return { ok: true, reason: '' };
+        }
+
+        function scoreAutoCandidate(inv, bayId, row, col) {
+            const deck = isDeckRow(bayId, row);
+            const level = getVerticalLevelFromBottom(bayId, row);
+            const center = getColumnCenterDistance(bayId, col);
+            const bayNum = parseInt(normalizeBayBase(bayId), 10) || 0;
+            let score = 0;
+
+            if (isImoInventory(inv)) score += 0;
+            else if (isReeferInventory(inv)) score += deck ? 0 : 8000;
+            else if (isTankInventory(inv)) score += deck ? 6000 : 0;
+            else if (isEmptyInventory(inv)) score += deck ? -1200 : 2500;
+            else score += deck ? 3000 : 0;
+
+            if (isEmptyInventory(inv)) score -= level * 35;
+            else score += level * 25;
+
+            if (isTankInventory(inv)) score += center * 30;
+            else score += center * 6;
+
+            if (hasMod(inv, 'oh')) score -= level * 15;
+            if (hasMod(inv, 'ow')) score += center * 10;
+            if (inv.size === '40' || inv.size === '45') score -= 80;
+            if (inv.size === '20') score += 30;
+
+            score += bayNum * 0.2;
+            return score;
+        }
+
+        function getAutoCandidates(inv) {
+            let candidates = [];
+            const allowedBays = getAllowedAutoBays(inv);
+            allowedBays.forEach(bayId => {
+                ensureBayStorage(bayId);
+                const grid = bayGrids[bayId];
+                if (!grid) return;
+
+                let rows;
+                if (isImoInventory(inv)) rows = [...grid.rowsAbove];
+                else if (isReeferInventory(inv)) rows = [...grid.rowsAbove, ...grid.rowsBelow];
+                else rows = [...grid.rowsBelow, ...grid.rowsAbove];
+
+                rows.forEach(row => {
+                    grid.cols.forEach(col => {
+                        const validation = validateAutoPlacement(inv, bayId, row, col);
+                        if (validation.ok) candidates.push({ bayId, row, col, score: scoreAutoCandidate(inv, bayId, row, col) });
+                    });
+                });
+            });
+            candidates.sort((a, b) => a.score - b.score);
+            return candidates;
+        }
+
+        function commitAutoPlacement(inv, bayId, row, col) {
+            const bay = normalizeBayBase(bayId);
+            const coord = `${row}-${col}`;
+            getTwinBays(bay).forEach(t => { savedShip[t][coord] = { invId: inv.id }; });
+
+            if (inv.size === '40' || inv.size === '45' || hasMod(inv, 'ol')) {
+                const sibling = getSiblingBay(bay);
+                if (sibling) getTwinBays(sibling).forEach(t => { savedShip[t][coord] = { base: 'blocked40' }; });
+            }
+            inv.placed++;
+        }
+
+        function getAutoGroupSortScore(inv) {
+            let category = 5;
+            if (isImoInventory(inv)) category = 0;
+            else if (isReeferInventory(inv)) category = 1;
+            else if (isTankInventory(inv)) category = 2;
+            else if (hasMod(inv, 'ow') || hasMod(inv, 'oh') || hasMod(inv, 'ol')) category = 3;
+            else if (isEmptyInventory(inv)) category = 6;
+            else category = 4;
+
+            const pol = getOrderIndex(POL_ORDER, inv.pol);
+            const pod = getOrderIndex(POD_ORDER, inv.pod);
+            const podBottomBias = 10 - pod;
+            const sizeBias = (inv.size === '40' || inv.size === '45') ? -1 : 1;
+            return category * 100000 + pol * 10000 + podBottomBias * 100 + sizeBias;
+        }
+
+        function clearAutoStowedCargoOnly() {
+            getAllActiveBayIds().forEach(b => { savedShip[b] = {}; });
+            globalInventory.forEach(inv => inv.placed = 0);
+            activeInvId = null;
+            lastClickedCell = null;
+        }
+
+        function applyHiddenPolToInventory() {
+            globalInventory.forEach((inv, idx) => {
+                if (!inv.pol && cargoData2026[idx] && cargoData2026[idx].pol) inv.pol = cargoData2026[idx].pol;
+            });
+        }
+
+        function runAutoStowage() {
+            syncInventoryFromTable();
+            applyHiddenPolToInventory();
+
+            if (!confirm('A estivagem automática vai limpar apenas os contêineres já alocados e manter o formato das bays/casco. Continuar?')) return;
+
+            clearAutoStowedCargoOnly();
+
+            const groups = [...globalInventory].filter(inv => inv.qty > 0).sort((a, b) => getAutoGroupSortScore(a) - getAutoGroupSortScore(b));
+            const failures = [];
+            let total = 0;
+            let placed = 0;
+
+            groups.forEach(inv => {
+                for (let i = 0; i < inv.qty; i++) {
+                    total++;
+                    const candidates = getAutoCandidates(inv);
+                    if (candidates.length) {
+                        const chosen = candidates[0];
+                        commitAutoPlacement(inv, chosen.bayId, chosen.row, chosen.col);
+                        placed++;
+                    } else {
+                        failures.push(inv);
+                    }
+                }
+            });
+
+            recalculateInventory();
+            persistData();
+            renderBayPairsUI();
+
+            const byKey = {};
+            failures.forEach(inv => {
+                const key = `${inv.pol || '?'} > ${inv.pod} | ${inv.qty}x ${inv.size}' ${inv.base.toUpperCase()} ${inv.mods.join(', ').toUpperCase()}`;
+                byKey[key] = (byKey[key] || 0) + 1;
+            });
+            const failureLines = Object.entries(byKey).map(([k, v]) => `${v} não alocado(s): ${k}`);
+            const report = [`Estivagem automática concluída.`, `Alocados: ${placed}/${total}.`, ...failureLines.slice(0, 20)];
+            if (failureLines.length > 20) report.push(`... e mais ${failureLines.length - 20} grupos com sobra.`);
+
+            const reportBox = document.getElementById('autoStowReport');
+            if (reportBox) {
+                reportBox.style.display = 'block';
+                reportBox.innerHTML = `<strong>Resultado:</strong><br>${report.map(line => line.replace(/</g, '&lt;').replace(/>/g, '&gt;')).join('<br>')}`;
+            }
+            alert(report.join('\n'));
+        }
+
+        // --- EXPORTAR PDF ---
+        async function generateRealPdf() {
+            const loadingOverlay = document.getElementById('pdfLoadingOverlay'); const printArea = document.getElementById('printArea'); const mainEl = document.querySelector('main'); const headerEl = document.querySelector('header');
+            loadingOverlay.style.display = 'flex'; printArea.innerHTML = ''; 
+            
+            let fullHtml = ''; BAY_PAIRS.forEach(pair => { fullHtml += `<div class="pdf-page">${generatePairHtml(pair[0], pair[1], true)}</div>`; });
+            printArea.innerHTML = fullHtml; headerEl.style.display = 'none'; mainEl.style.display = 'none'; printArea.style.display = 'block';
+
+            await new Promise(r => setTimeout(r, 500));
+            const opt = { margin: 0, filename: 'BayPlan_Azimuth_2026.pdf', image: { type: 'jpeg', quality: 1 }, html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', scrollY: 0, windowWidth: document.documentElement.offsetWidth }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' } };
+
+            try { await html2pdf().set(opt).from(printArea).save(); } catch(e) { alert("Houve um erro ao gerar o PDF. " + e); }
+            printArea.style.display = 'none'; printArea.innerHTML = ''; headerEl.style.display = 'flex'; mainEl.style.display = 'flex'; loadingOverlay.style.display = 'none';
+        }
+
+        // --- 7. LÓGICA DE CLIQUE E SHIFT (Pintura / Deleção com Sincronia de Gêmeas) ---
         function removeContainer(bayId, rStr, cStr) {
             let coord = `${rStr}-${cStr}`;
             let existing = savedShip[bayId][coord];
             if (!existing) return;
             
-            if (existing.base === 'blocked_twin') {
-                alert("Este slot está ocupado na planta principal (Normal, IMO ou REEFER). Remova-o por lá.");
-                return;
-            }
-
             if (existing.base === 'blocked40') {
                 let sibling = getSiblingBay(bayId);
-                if (sibling) removeContainer(sibling, rStr, cStr);
-                return;
-            }
-            
-            if (existing.invId !== undefined) {
+                if(sibling) getTwinBays(sibling).forEach(t => delete savedShip[t][coord]);
+                getTwinBays(bayId).forEach(t => delete savedShip[t][coord]);
+            } 
+            else if (existing.invId !== undefined) {
                 let inv = globalInventory.find(i => i.id === existing.invId);
-                let is40 = inv && (inv.size === '40' || inv.size === '45' || inv.mods.includes('ol'));
+                let is40 = inv && (inv.size === '40' || inv.size === '45');
                 
-                let twinsB1 = getTwinBays(bayId);
-                twinsB1.forEach(t => {
-                    if (savedShip[t][coord]) delete savedShip[t][coord];
-                });
+                getTwinBays(bayId).forEach(t => delete savedShip[t][coord]);
 
                 if (is40) {
                     let sibling = getSiblingBay(bayId);
-                    if (sibling) {
-                        let twinsB2 = getTwinBays(sibling);
-                        twinsB2.forEach(t => {
-                            if (savedShip[t][coord]) delete savedShip[t][coord];
-                        });
-                    }
+                    if(sibling) getTwinBays(sibling).forEach(t => delete savedShip[t][coord]);
                 }
-            } else {
-                 delete savedShip[bayId][coord];
             }
-        }
-
-        function canPlaceContainer(inv, bayId, showAlert = true) {
-            let isImo = inv.base === 'imo' || inv.mods.includes('imo5') || inv.mods.includes('imo8');
-            let isReefer = inv.base === 'reefer' || inv.mods.includes('reefer');
-
-            let isImoBay = bayId.includes('IMO');
-            let isReeferBay = bayId.includes('REEFER');
-
-            if (isImo && !isImoBay) {
-                if (showAlert) alert("Contêineres IMO devem ser alocados nas plantas específicas de IMO (Ex: 01 IMO).");
-                return false;
-            }
-            if (isReefer && !isReeferBay) {
-                if (showAlert) alert("Contêineres Reefer devem ser alocados nas plantas específicas de REEFER (Ex: 17 REEFER).");
-                return false;
-            }
-            if (!isImo && isImoBay) {
-                if (showAlert) alert("Apenas contêineres IMO podem ser alocados nestas plantas de IMO.");
-                return false;
-            }
-            if (!isReefer && isReeferBay) {
-                if (showAlert) alert("Apenas contêineres Reefer podem ser alocados nestas plantas de REEFER.");
-                return false;
-            }
-            return true;
         }
 
         function placeContainer(bayId, rStr, cStr, showAlert = true) {
             let coord = `${rStr}-${cStr}`;
             if (shipTopology[bayId][coord]) return; 
-            
+
+            // Check se alguma versão gêmea deste slot já está ocupada
             let twinsB1 = getTwinBays(bayId);
-            for(let t of twinsB1) {
-                 if(savedShip[t][coord] && savedShip[t][coord].base !== 'blocked_ow' && savedShip[t][coord].base !== 'blocked_ot') return;
-            }
+            for(let t of twinsB1) { if(savedShip[t][coord]) return; }
 
             if (activeInvId !== null) {
                 let inv = globalInventory.find(i => i.id === activeInvId);
                 let remaining = inv.qty - inv.placed;
-                
-                if (remaining > 0) {
-                    if (!canPlaceContainer(inv, bayId, showAlert)) return;
 
-                    if (inv.size === '40' || inv.size === '45' || inv.mods.includes('ol')) {
+                if (remaining > 0) {
+                    // Sem mais bloqueios. Você pode colocar Reefers e IMOS onde quiser. O Filtro visual trata o resto.
+                    if (!validateOwRulesForPlacement(bayId, rStr, cStr, inv, showAlert)) return;
+
+                    if (inv.size === '40' || inv.size === '45') {
                         let sibling = getSiblingBay(bayId);
                         if (!sibling) return;
-                        
+
                         let twinsB2 = getTwinBays(sibling);
-                        for(let t of twinsB2) {
-                            if (shipTopology[t][coord] || (savedShip[t][coord] && savedShip[t][coord].base !== 'blocked_ow' && savedShip[t][coord].base !== 'blocked_ot')) return;
-                        }
-                        
-                        savedShip[sibling][coord] = { base: 'blocked40' }; 
-                        twinsB2.filter(t => t !== sibling).forEach(t => savedShip[t][coord] = { base: 'blocked_twin' });
+                        for(let t of twinsB2) { if (shipTopology[t][coord] || savedShip[t][coord]) return; }
+
+                        twinsB2.forEach(t => savedShip[t][coord] = { base: 'blocked40' });
                     }
-                    
-                    savedShip[bayId][coord] = { invId: inv.id };
-                    twinsB1.filter(t => t !== bayId).forEach(t => savedShip[t][coord] = { base: 'blocked_twin' });
+
+                    twinsB1.forEach(t => savedShip[t][coord] = { invId: inv.id });
                     inv.placed++; 
                 }
             }
@@ -1695,31 +1928,23 @@
         function attachCellListeners() {
             document.querySelectorAll('.cell').forEach(cell => {
                 cell.addEventListener('mousedown', function(e) {
-                    let rStr = this.getAttribute('data-row');
-                    let cStr = this.getAttribute('data-col');
-                    let bayId = this.getAttribute('data-bay');
-                    
-                    let grid = bayGrids[bayId];
-                    let all_rows = [...grid.rowsAbove, ...grid.rowsBelow];
-                    let rIdx = all_rows.indexOf(rStr);
-                    let cIdx = grid.cols.indexOf(cStr);
+                    let rStr = this.getAttribute('data-row'); let cStr = this.getAttribute('data-col'); let bayId = this.getAttribute('data-bay');
+                    let grid = bayGrids[bayId]; let all_rows = [...grid.rowsAbove, ...grid.rowsBelow];
+                    let rIdx = all_rows.indexOf(rStr); let cIdx = grid.cols.indexOf(cStr);
 
                     if (e.shiftKey && activeInvId !== null && isShiftActionFill && !currentState.editMode) {
                         let inv = globalInventory.find(i => i.id === activeInvId);
-                        if (inv && !canPlaceContainer(inv, bayId, true)) return;
+                        if (!inv) return;
                     }
 
                     if (e.shiftKey && lastClickedCell && lastClickedCell.bayId === bayId) {
-                        let minR = Math.min(rIdx, lastClickedCell.r);
-                        let maxR = Math.max(rIdx, lastClickedCell.r);
-                        let minC = Math.min(cIdx, lastClickedCell.c);
-                        let maxC = Math.max(cIdx, lastClickedCell.c);
-                        
+                        let minR = Math.min(rIdx, lastClickedCell.r); let maxR = Math.max(rIdx, lastClickedCell.r);
+                        let minC = Math.min(cIdx, lastClickedCell.c); let maxC = Math.max(cIdx, lastClickedCell.c);
                         for(let r = minR; r <= maxR; r++) {
                             for(let c = minC; c <= maxC; c++) {
                                 let targetCoord = `${all_rows[r]}-${grid.cols[c]}`;
                                 if(currentState.editMode) {
-                                     shipTopology[bayId][targetCoord] = isShiftActionFill;
+                                     getTwinBays(bayId).forEach(t => shipTopology[t][targetCoord] = isShiftActionFill);
                                 } else {
                                      if(isShiftActionFill) placeContainer(bayId, all_rows[r], grid.cols[c], false);
                                      else removeContainer(bayId, all_rows[r], grid.cols[c]);
@@ -1728,39 +1953,19 @@
                         }
                     } else {
                         let coord = `${rStr}-${cStr}`;
-                        
                         if(currentState.editMode) {
-                             shipTopology[bayId][coord] = !shipTopology[bayId][coord];
-                             isShiftActionFill = shipTopology[bayId][coord]; 
+                             isShiftActionFill = !shipTopology[bayId][coord];
+                             getTwinBays(bayId).forEach(t => shipTopology[t][coord] = isShiftActionFill); 
                         } else {
                              let existing = savedShip[bayId][coord];
-                             if(existing && (existing.invId !== undefined || existing.base === 'blocked40' || existing.base === 'blocked_twin')) {
-                                 removeContainer(bayId, rStr, cStr);
-                                 isShiftActionFill = false; 
-                             } else {
-                                 placeContainer(bayId, rStr, cStr, true);
-                                 isShiftActionFill = true; 
-                             }
+                             if(existing && (existing.invId !== undefined || existing.base === 'blocked40')) {
+                                 removeContainer(bayId, rStr, cStr); isShiftActionFill = false; 
+                             } else { placeContainer(bayId, rStr, cStr); isShiftActionFill = true; }
                         }
                         lastClickedCell = { r: rIdx, c: cIdx, bayId: bayId };
                     }
-                    
-                    recalculateInventory(); 
-                    renderBayPairsUI();       
+                    recalculateInventory(); renderBayPairsUI();       
                 });
-            });
-        }
-
-        // --- REGISTRO DO SERVICE WORKER (PWA) ---
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js')
-                    .then(registration => {
-                        console.log('ServiceWorker registrado com sucesso no escopo:', registration.scope);
-                    })
-                    .catch(error => {
-                        console.log('Falha ao registrar o ServiceWorker:', error);
-                    });
             });
         }
 
