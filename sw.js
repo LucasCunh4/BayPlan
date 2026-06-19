@@ -1,4 +1,4 @@
-const CACHE_NAME = 'stowage-pro-v8';
+const CACHE_NAME = 'stowage-pro-v9';
 const urlsToCache = [
   './',
   './index.html',
