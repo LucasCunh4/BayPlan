@@ -149,6 +149,9 @@
         .auto-attempt-box { margin-top: 10px; padding: 9px; background: #f4f8fb; border: 1px solid #d5e2ee; border-radius: 6px; }
         .auto-attempt-box label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; font-weight: bold; color: #34495e; }
         .auto-attempt-box input { width: 100%; padding: 7px; border: 1px solid #bfcbd6; border-radius: 4px; font-size: 13px; font-weight: bold; }
+        .auto-option-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+        .auto-option-grid label:first-child { grid-column: 1 / -1; }
+        @media (max-width: 520px) { .auto-option-grid { grid-template-columns: 1fr; } .auto-option-grid label:first-child { grid-column: auto; } }
         .auto-stow-hint { font-size: 10px; color: #687887; margin-top: 6px; line-height: 1.25; }
         .auto-progress-wrap { display: none; margin-top: 10px; padding: 8px; background: #fff; border: 1px solid #d5e2ee; border-radius: 6px; }
         .auto-progress-track { width: 100%; height: 12px; background: #e1e8ef; border-radius: 999px; overflow: hidden; }
@@ -540,10 +543,18 @@
                         <button class="btn-filter" id="btnFilterReefer">❄️ Ver Reefer</button>
                     </div>
                     <div class="auto-attempt-box">
-                        <label>Quantidade de tentativas
-                            <input type="number" id="autoAttemptCount" min="1" max="5000" step="50" value="500">
-                        </label>
-                        <div class="auto-stow-hint">Mais tentativas = mais chance de achar uma estivagem melhor. Tentativas piores são descartadas automaticamente.</div>
+                        <div class="auto-option-grid">
+                            <label>Quantidade de tentativas
+                                <input type="number" id="autoAttemptCount" min="1" max="20000" step="100" value="1000">
+                            </label>
+                            <label>Tempo máximo (s)
+                                <input type="number" id="autoMaxSeconds" min="0" max="300" step="5" value="25">
+                            </label>
+                            <label>Atualizar tela a cada
+                                <input type="number" id="autoUiInterval" min="1" max="500" step="5" value="25">
+                            </label>
+                        </div>
+                        <div class="auto-stow-hint">0 s = sem limite de tempo. A busca mistura tentativas do zero com reparos das melhores tentativas, sem deixar tentativas piores substituírem o melhor plano.</div>
                     </div>
                     <button class="btn-auto-stow" id="btnAutoStow">🧠 Estivar Automaticamente</button>
                     <div id="autoProgressWrap" class="auto-progress-wrap">
@@ -1350,7 +1361,7 @@
 
         function getInventoryFromCellData(cellData) {
             if (!cellData || cellData.invId === undefined) return null;
-            return globalInventory.find(i => i.id === cellData.invId) || null;
+            return getInventoryByIdFast(cellData.invId);
         }
 
         function getInventoryAtPosition(bayId, row, col) {
@@ -1616,7 +1627,7 @@
 
             for (let t of getTwinBays(base)) {
                 const cell = savedShip[t] && savedShip[t][coord];
-                if (cell && cell.invId !== undefined) return globalInventory.find(i => i.id === cell.invId) || null;
+                if (cell && cell.invId !== undefined) return getInventoryByIdFast(cell.invId);
             }
 
             const direct = savedShip[base] && savedShip[base][coord];
@@ -1626,7 +1637,7 @@
             if (sibling) {
                 for (let t of getTwinBays(sibling)) {
                     const cell = savedShip[t] && savedShip[t][coord];
-                    if (cell && cell.invId !== undefined) return globalInventory.find(i => i.id === cell.invId) || null;
+                    if (cell && cell.invId !== undefined) return getInventoryByIdFast(cell.invId);
                 }
             }
             return null;
@@ -1761,26 +1772,46 @@
             return score;
         }
 
-        function getAutoCandidates(inv) {
-            let candidates = [];
-            const allowedBays = getAllowedAutoBays(inv);
-            allowedBays.forEach(bayId => {
-                ensureBayStorage(bayId);
-                const grid = bayGrids[bayId];
-                if (!grid) return;
-
-                let rows;
-                if (isImoInventory(inv)) rows = [...grid.rowsAbove];
-                else if (isReeferInventory(inv)) rows = [...grid.rowsAbove, ...grid.rowsBelow];
-                else rows = [...grid.rowsBelow, ...grid.rowsAbove];
-
-                rows.forEach(row => {
-                    grid.cols.forEach(col => {
-                        const validation = validateAutoPlacement(inv, bayId, row, col);
-                        if (validation.ok) candidates.push({ bayId, row, col, score: scoreAutoCandidate(inv, bayId, row, col) });
-                    });
+        function buildAutoPositionCache() {
+            const cache = { normal: [], reefer: [], imoNA: [], imoLH: [] };
+            const addPositions = (key, bayIds, rowMode) => {
+                bayIds.forEach(bayId => {
+                    ensureBayStorage(bayId);
+                    const grid = bayGrids[bayId];
+                    if (!grid) return;
+                    let rows;
+                    if (rowMode === 'deck') rows = [...grid.rowsAbove];
+                    else if (rowMode === 'reefer') rows = [...grid.rowsAbove, ...grid.rowsBelow];
+                    else rows = [...grid.rowsBelow, ...grid.rowsAbove];
+                    rows.forEach(row => grid.cols.forEach(col => cache[key].push({ bayId, row, col })));
                 });
-            });
+            };
+            addPositions('normal', BASE_BAY_PAIRS.flat(), 'normal');
+            addPositions('reefer', REEFER_BAYS, 'reefer');
+            addPositions('imoNA', ['01'], 'deck');
+            addPositions('imoLH', ['11'], 'deck');
+            return cache;
+        }
+
+        function getAutoPositionList(inv) {
+            if (!autoRuntime.positionCache) autoRuntime.positionCache = buildAutoPositionCache();
+            if (isImoInventory(inv)) {
+                if (inv.pod === 'NA') return autoRuntime.positionCache.imoNA;
+                if (inv.pod === 'LH') return autoRuntime.positionCache.imoLH;
+                return [];
+            }
+            if (isReeferInventory(inv)) return autoRuntime.positionCache.reefer;
+            return autoRuntime.positionCache.normal;
+        }
+
+        function getAutoCandidates(inv) {
+            const candidates = [];
+            const positions = getAutoPositionList(inv);
+            for (let i = 0; i < positions.length; i++) {
+                const pos = positions[i];
+                const validation = validateAutoPlacement(inv, pos.bayId, pos.row, pos.col);
+                if (validation.ok) candidates.push({ bayId: pos.bayId, row: pos.row, col: pos.col, score: scoreAutoCandidate(inv, pos.bayId, pos.row, pos.col) });
+            }
             candidates.sort((a, b) => a.score - b.score);
             return candidates;
         }
@@ -1834,7 +1865,25 @@
             const input = document.getElementById('autoAttemptCount');
             let val = input ? parseInt(input.value, 10) : 500;
             if (!Number.isFinite(val) || val < 1) val = 1;
-            if (val > 5000) val = 5000;
+            if (val > 20000) val = 20000;
+            if (input) input.value = val;
+            return val;
+        }
+
+        function getAutoMaxMsFromInput() {
+            const input = document.getElementById('autoMaxSeconds');
+            let val = input ? parseFloat(input.value) : 25;
+            if (!Number.isFinite(val) || val < 0) val = 0;
+            if (val > 300) val = 300;
+            if (input) input.value = val;
+            return val > 0 ? val * 1000 : 0;
+        }
+
+        function getAutoUiIntervalFromInput() {
+            const input = document.getElementById('autoUiInterval');
+            let val = input ? parseInt(input.value, 10) : 25;
+            if (!Number.isFinite(val) || val < 1) val = 1;
+            if (val > 500) val = 500;
             if (input) input.value = val;
             return val;
         }
@@ -1846,6 +1895,31 @@
                 .replace(/>/g, '&gt;')
                 .replace(/"/g, '&quot;')
                 .replace(/'/g, '&#039;');
+        }
+
+        const autoRuntime = {
+            inventoryById: null,
+            positionCache: null,
+            bestSnapshot: null,
+            eliteResults: [],
+            startedAt: 0
+        };
+
+        function rebuildAutoRuntimeIndexes() {
+            autoRuntime.inventoryById = Object.create(null);
+            globalInventory.forEach(inv => {
+                if (inv && inv.id) autoRuntime.inventoryById[inv.id] = inv;
+            });
+            autoRuntime.positionCache = null;
+        }
+
+        function getInventoryByIdFast(invId) {
+            if (autoRuntime.inventoryById && autoRuntime.inventoryById[invId]) return autoRuntime.inventoryById[invId];
+            return globalInventory.find(i => i.id === invId) || null;
+        }
+
+        function getAutoElapsedMs() {
+            return autoRuntime.startedAt ? (performance.now() - autoRuntime.startedAt) : 0;
         }
 
         function createAutoRng(seed) {
@@ -2022,7 +2096,7 @@
                         let uniqueId = `${cell.invId}-${baseBay}-${coord}`;
                         if (!countedSlots.has(uniqueId)) {
                             countedSlots.add(uniqueId);
-                            let inv = globalInventory.find(i => i.id === cell.invId);
+                            let inv = getInventoryByIdFast(cell.invId);
                             if(inv) inv.placed++;
                         }
                     }
@@ -2042,10 +2116,212 @@
             return true;
         }
 
-        function runSingleAutoAttempt(attemptIndex) {
+        function cloneAutoFailure(inv) {
+            return {
+                id: inv.id,
+                pol: inv.pol,
+                pod: inv.pod,
+                qty: 1,
+                size: inv.size,
+                base: inv.base,
+                mods: [...(inv.mods || [])]
+            };
+        }
+
+        function hydrateAutoFailure(failure) {
+            if (!failure) return null;
+            if (failure.id) return getInventoryByIdFast(failure.id);
+            return globalInventory.find(inv =>
+                inv.pol === failure.pol &&
+                inv.pod === failure.pod &&
+                inv.size === failure.size &&
+                inv.base === failure.base &&
+                JSON.stringify(inv.mods || []) === JSON.stringify(failure.mods || [])
+            ) || null;
+        }
+
+        function captureAutoResultSnapshot(result) {
+            result.savedShip = clonePlainObject(savedShip);
+            result.failures = (result.failures || []).map(inv => cloneAutoFailure(inv));
+            return result;
+        }
+
+        function getWorstAutoElite() {
+            if (!autoRuntime.eliteResults || !autoRuntime.eliteResults.length) return null;
+            return autoRuntime.eliteResults[autoRuntime.eliteResults.length - 1];
+        }
+
+        function shouldKeepAutoElite(result) {
+            if (!result) return false;
+            if (!autoRuntime.eliteResults) autoRuntime.eliteResults = [];
+            if (autoRuntime.eliteResults.length < 10) return true;
+            const worst = getWorstAutoElite();
+            return isBetterAutoResult(result, worst);
+        }
+
+        function insertAutoEliteResult(capturedResult) {
+            if (!capturedResult || !capturedResult.savedShip) return false;
+            if (!autoRuntime.eliteResults) autoRuntime.eliteResults = [];
+
+            autoRuntime.eliteResults.push(capturedResult);
+            autoRuntime.eliteResults.sort((a, b) => {
+                if (a.placed !== b.placed) return b.placed - a.placed;
+                if (a.specialPlaced !== b.specialPlaced) return b.specialPlaced - a.specialPlaced;
+                return a.placementScore - b.placementScore;
+            });
+
+            // Evita guardar dez cópias praticamente iguais da mesma pontuação.
+            const filtered = [];
+            autoRuntime.eliteResults.forEach(item => {
+                const duplicate = filtered.find(other =>
+                    other.placed === item.placed &&
+                    other.specialPlaced === item.specialPlaced &&
+                    Math.abs(other.placementScore - item.placementScore) < 0.0001 &&
+                    other.mode === item.mode
+                );
+                if (!duplicate) filtered.push(item);
+            });
+            autoRuntime.eliteResults = filtered.slice(0, 10);
+            return true;
+        }
+
+        function rememberAutoEliteResult(result) {
+            if (!shouldKeepAutoElite(result)) return null;
+            const captured = captureAutoResultSnapshot(result);
+            insertAutoEliteResult(captured);
+            return captured;
+        }
+
+        function selectAutoEliteBase(rng) {
+            const elite = autoRuntime.eliteResults || [];
+            if (!elite.length) return null;
+            let totalWeight = 0;
+            const weights = elite.map((_, idx) => {
+                // A melhor é mais provável, mas outras também entram para não prender em ótimo local.
+                const w = 1 / ((idx + 1) * 1.35);
+                totalWeight += w;
+                return w;
+            });
+            let pick = rng() * totalWeight;
+            for (let i = 0; i < elite.length; i++) {
+                pick -= weights[i];
+                if (pick <= 0) return elite[i];
+            }
+            return elite[0];
+        }
+
+        function getUniquePlacedAutoRecords() {
+            const records = [];
+            const seen = new Set();
+            for (let bay in savedShip) {
+                const baseBay = normalizeBayBase(bay);
+                const bayData = savedShip[bay] || {};
+                Object.keys(bayData).forEach(coord => {
+                    const cell = bayData[coord];
+                    if (!cell || cell.invId === undefined) return;
+                    const key = `${baseBay}|${coord}`;
+                    if (seen.has(key)) return;
+                    seen.add(key);
+                    const inv = getInventoryByIdFast(cell.invId);
+                    if (!inv) return;
+                    const [row, col] = coord.split('-');
+                    records.push({ bayId: baseBay, row, col, coord, inv });
+                });
+            }
+            return records;
+        }
+
+        function isTopRemovableAutoRecord(record) {
+            if (!record || !record.inv) return false;
+            const footprint = getPhysicalFootprintBays(record.bayId, record.inv);
+            for (let b of footprint) {
+                const above = getRowAbove(b, record.row);
+                if (above && isPhysicalPositionOccupied(b, above, record.col)) return false;
+            }
+            return true;
+        }
+
+        function removeAutoRecord(record) {
+            if (!record || !record.inv) return false;
+            const coord = record.coord || `${record.row}-${record.col}`;
+            getTwinBays(record.bayId).forEach(t => {
+                if (savedShip[t]) delete savedShip[t][coord];
+            });
+            if (record.inv.size === '40' || record.inv.size === '45' || hasMod(record.inv, 'ol')) {
+                const sibling = getSiblingBay(record.bayId);
+                if (sibling) {
+                    getTwinBays(sibling).forEach(t => {
+                        if (savedShip[t] && savedShip[t][coord] && savedShip[t][coord].base === 'blocked40') delete savedShip[t][coord];
+                    });
+                }
+            }
+            return true;
+        }
+
+        function shuffleAutoArray(arr, rng) {
+            for (let i = arr.length - 1; i > 0; i--) {
+                const j = Math.floor(rng() * (i + 1));
+                [arr[i], arr[j]] = [arr[j], arr[i]];
+            }
+            return arr;
+        }
+
+        function pickAutoRepairRecords(baseFailures, attemptIndex, rng) {
+            const failureInvs = baseFailures.map(hydrateAutoFailure).filter(Boolean);
+            const hasReeferFail = failureInvs.some(isReeferInventory);
+            const hasImoNaFail = failureInvs.some(inv => isImoInventory(inv) && inv.pod === 'NA');
+            const hasImoLhFail = failureInvs.some(inv => isImoInventory(inv) && inv.pod === 'LH');
+            const hasSpecialFail = failureInvs.some(inv => hasMod(inv, 'ow') || hasMod(inv, 'oh') || hasMod(inv, 'ol'));
+
+            const allTopRecords = getUniquePlacedAutoRecords().filter(isTopRemovableAutoRecord);
+            const selected = [];
+            const used = new Set();
+
+            const addRecord = (r) => {
+                if (!r) return;
+                const key = `${r.bayId}|${r.coord}`;
+                if (used.has(key)) return;
+                used.add(key);
+                selected.push(r);
+            };
+
+            let targeted = [];
+            if (hasReeferFail) targeted = targeted.concat(allTopRecords.filter(r => REEFER_BAYS.includes(r.bayId) && !isReeferInventory(r.inv)));
+            if (hasImoNaFail) targeted = targeted.concat(allTopRecords.filter(r => r.bayId === '01' && isDeckRow(r.bayId, r.row) && !isImoInventory(r.inv)));
+            if (hasImoLhFail) targeted = targeted.concat(allTopRecords.filter(r => r.bayId === '11' && isDeckRow(r.bayId, r.row) && !isImoInventory(r.inv)));
+            if (hasSpecialFail) targeted = targeted.concat(allTopRecords.filter(r => isEmptyInventory(r.inv) || r.inv.base === 'dry' || isTankInventory(r.inv)));
+            if (!targeted.length) targeted = allTopRecords.filter(r => isEmptyInventory(r.inv) || r.inv.base === 'dry');
+            if (!targeted.length) targeted = allTopRecords;
+
+            targeted.sort((a, b) => {
+                const aPenalty = (isEmptyInventory(a.inv) ? -300 : 0) + (isReeferInventory(a.inv) || isImoInventory(a.inv) ? 1000 : 0) - getVerticalLevelFromBottom(a.bayId, a.row) * 10;
+                const bPenalty = (isEmptyInventory(b.inv) ? -300 : 0) + (isReeferInventory(b.inv) || isImoInventory(b.inv) ? 1000 : 0) - getVerticalLevelFromBottom(b.bayId, b.row) * 10;
+                return aPenalty - bPenalty;
+            });
+
+            const aggressive = attemptIndex % 11 === 0 || attemptIndex % 17 === 0;
+            const baseNeed = Math.max(6, failureInvs.length || 4);
+            const maxRemove = Math.min(
+                allTopRecords.length,
+                aggressive ? Math.max(20, Math.floor(allTopRecords.length * 0.18)) : Math.max(8, Math.floor(allTopRecords.length * 0.07))
+            );
+            const targetCount = Math.min(maxRemove, baseNeed + Math.floor(rng() * (aggressive ? 22 : 10)));
+
+            shuffleAutoArray(targeted, rng).forEach(r => { if (selected.length < targetCount) addRecord(r); });
+            shuffleAutoArray([...allTopRecords], rng).forEach(r => { if (selected.length < targetCount) addRecord(r); });
+            return selected;
+        }
+
+        function buildRepairUnitOrder(failureInvs, removedInvs, attemptIndex, rng) {
+            const units = [];
+            failureInvs.forEach(inv => { if (inv) units.push({ inv, priority: getAutoUnitPriority(inv, attemptIndex + 1000, rng) - 2000000 }); });
+            removedInvs.forEach(inv => { if (inv) units.push({ inv, priority: getAutoUnitPriority(inv, attemptIndex + 2000, rng) + (isEmptyInventory(inv) ? 800000 : 0) }); });
+            units.sort((a, b) => a.priority - b.priority);
+            return units.map(u => u.inv);
+        }
+
+        function runScratchAutoAttempt(attemptIndex, rng) {
             clearAutoStowedCargoOnly();
-            const seed = ((Date.now() & 0xffffffff) ^ Math.imul(attemptIndex + 1, 2654435761)) >>> 0;
-            const rng = createAutoRng(seed);
             const units = buildAutoUnitOrder(attemptIndex, rng);
             const failures = [];
             let placementScore = 0;
@@ -2059,19 +2335,58 @@
                     commitAutoPlacement(inv, chosen.bayId, chosen.row, chosen.col);
                     placed++;
                     placementScore += chosen.score;
-                } else {
-                    failures.push(inv);
-                }
+                } else failures.push(inv);
             }
 
-            return {
-                attemptIndex,
-                placed,
-                specialPlaced: getPlacedSpecialCount(),
-                placementScore,
-                savedShip: clonePlainObject(savedShip),
-                failures: failures.map(inv => ({ pol: inv.pol, pod: inv.pod, qty: inv.qty, size: inv.size, base: inv.base, mods: [...(inv.mods || [])] }))
-            };
+            return { attemptIndex, mode: 'do zero', placed, specialPlaced: getPlacedSpecialCount(), placementScore, savedShip: null, failures };
+        }
+
+        function runRepairAutoAttempt(attemptIndex, baseResult, rng) {
+            if (!baseResult || !baseResult.savedShip) return runScratchAutoAttempt(attemptIndex, rng);
+            applyBestAutoResultToState(baseResult, false, false);
+
+            const baseFailures = baseResult.failures || [];
+            const failureInvs = baseFailures.map(hydrateAutoFailure).filter(Boolean);
+            const removalRecords = pickAutoRepairRecords(baseFailures, attemptIndex, rng);
+            const removedInvs = [];
+
+            removalRecords.forEach(record => {
+                if (removeAutoRecord(record)) removedInvs.push(record.inv);
+            });
+            recalculateInventoryCountsOnly();
+
+            const units = buildRepairUnitOrder(failureInvs, removedInvs, attemptIndex, rng);
+            const failures = [];
+            let placementScore = baseResult.placementScore || 0;
+            for (let i = 0; i < units.length; i++) {
+                const inv = units[i];
+                const candidates = getAutoCandidates(inv);
+                const chosen = chooseAutoCandidate(candidates, inv, attemptIndex + 500, rng);
+                if (chosen) {
+                    commitAutoPlacement(inv, chosen.bayId, chosen.row, chosen.col);
+                    placementScore += chosen.score;
+                } else failures.push(inv);
+            }
+
+            recalculateInventoryCountsOnly();
+            const placed = getCurrentPlacedCount();
+            return { attemptIndex, mode: `reparo elite (${baseResult.placed || 0})`, placed, specialPlaced: getPlacedSpecialCount(), placementScore, savedShip: null, failures };
+        }
+
+        function runSingleAutoAttempt(attemptIndex) {
+            const seed = ((Date.now() & 0xffffffff) ^ Math.imul(attemptIndex + 1, 2654435761)) >>> 0;
+            const rng = createAutoRng(seed);
+            const elite = autoRuntime.eliteResults || [];
+            const canRepair = attemptIndex > 0 && elite.length > 0;
+
+            if (canRepair) {
+                const forceScratch = attemptIndex % 9 === 0 || attemptIndex % 13 === 0;
+                if (!forceScratch && rng() < 0.68) {
+                    const base = selectAutoEliteBase(rng);
+                    return runRepairAutoAttempt(attemptIndex, base, rng);
+                }
+            }
+            return runScratchAutoAttempt(attemptIndex, rng);
         }
 
         function isBetterAutoResult(candidate, currentBest) {
@@ -2096,11 +2411,17 @@
             if (autoStowRunning) return;
             syncInventoryFromTable();
             applyHiddenPolToInventory();
+            rebuildAutoRuntimeIndexes();
 
             const attempts = getAutoAttemptsFromInput();
-            if (!confirm(`A estivagem automática forte vai limpar apenas os contêineres já alocados e manter o formato das bays/casco.\n\nTentativas: ${attempts}\n\nContinuar?`)) return;
+            const maxMs = getAutoMaxMsFromInput();
+            const uiEvery = getAutoUiIntervalFromInput();
+            const timeText = maxMs > 0 ? `${Math.round(maxMs / 1000)}s` : 'sem limite';
+            if (!confirm(`A estivagem automática forte vai limpar apenas os contêineres já alocados e manter o formato das bays/casco.\n\nTentativas: ${attempts}\nTempo máximo: ${timeText}\n\nContinuar?`)) return;
 
             autoStowRunning = true;
+            autoRuntime.startedAt = performance.now();
+            autoRuntime.eliteResults = [];
             const btn = document.getElementById('btnAutoStow');
             if (btn) {
                 btn.disabled = true;
@@ -2110,10 +2431,17 @@
             const totalCargo = getAutoTotalCargo();
             let best = null;
             let executedAttempts = 0;
+            let stoppedByTime = false;
             let lastYield = performance.now();
+            let lastRenderedBestPlaced = -1;
 
-            setAutoProgress(0, attempts, 0, totalCargo, 'Iniciando busca por melhor combinação...');
-            setAutoReport([`Testando ${attempts} possibilidade(s).`, 'O melhor plano encontrado será aplicado ao final.'], true);
+            setAutoProgress(0, attempts, 0, totalCargo, 'Iniciando busca híbrida: do zero + reparo das melhores tentativas...');
+            setAutoReport([
+                `Testando até ${attempts} possibilidade(s).`,
+                `Tempo máximo: ${timeText}.`,
+                'A busca guarda até 10 melhores planos e usa alguns deles como base para reparos.',
+                'Tentativas piores são descartadas e nunca substituem o melhor plano.'
+            ], true);
             await autoYield();
 
             try {
@@ -2122,36 +2450,54 @@
                     executedAttempts = attempt + 1;
                     const previousBestPlaced = best ? best.placed : 0;
                     const improvedBest = isBetterAutoResult(result, best);
+                    let capturedForElite = null;
 
+                    if (improvedBest || shouldKeepAutoElite(result)) {
+                        capturedForElite = rememberAutoEliteResult(result);
+                    }
                     if (improvedBest) {
-                        best = result;
+                        best = capturedForElite || captureAutoResultSnapshot(result);
+                        insertAutoEliteResult(best);
                     }
 
-                    // Trava de melhor tentativa: uma tentativa pior nunca fica aplicada no estado do plano.
-                    // Depois de cada tentativa, voltamos imediatamente para o melhor snapshot já encontrado.
-                    applyBestAutoResultToState(best, false, false);
-
                     const now = performance.now();
-                    const shouldUpdate = attempt === 0 || improvedBest || attempt === attempts - 1 || (attempt + 1) % 5 === 0 || (now - lastYield) > 120;
-                    if (shouldUpdate) {
-                        applyBestAutoResultToState(best, true, false);
-                        const detail = best && best.placed === totalCargo
-                            ? 'Plano completo encontrado. Finalizando...'
+                    const elapsed = now - autoRuntime.startedAt;
+                    const hitTimeLimit = maxMs > 0 && elapsed >= maxMs;
+                    const shouldYield = attempt === 0 || improvedBest || attempt === attempts - 1 || hitTimeLimit || (attempt + 1) % uiEvery === 0 || (now - lastYield) > 350;
+
+                    if (shouldYield) {
+                        const bestPlaced = best ? best.placed : 0;
+                        const elapsedSec = (elapsed / 1000).toFixed(1);
+                        const detail = bestPlaced >= totalCargo
+                            ? `Plano completo encontrado em ${executedAttempts} tentativa(s).`
                             : improvedBest
-                                ? `Nova melhor tentativa: ${best ? best.placed : 0}/${totalCargo}. A tela foi atualizada com ela.`
-                                : `Última tentativa descartada: ${result.placed}/${totalCargo}. Melhor mantido: ${best ? best.placed : 0}/${totalCargo}.`;
-                        setAutoProgress(attempt + 1, attempts, best ? best.placed : 0, totalCargo, detail);
+                                ? `Nova melhor tentativa: ${bestPlaced}/${totalCargo}. Modo: ${result.mode || 'tentativa'}. Tempo: ${elapsedSec}s.`
+                                : `Última tentativa descartada: ${result.placed}/${totalCargo}. Melhor mantido: ${bestPlaced}/${totalCargo}. Modo: ${result.mode || 'tentativa'}. Tempo: ${elapsedSec}s.`;
+                        setAutoProgress(attempt + 1, attempts, bestPlaced, totalCargo, detail);
+
+                        if (improvedBest && best && best.savedShip && bestPlaced !== lastRenderedBestPlaced) {
+                            applyBestAutoResultToState(best, true, false);
+                            lastRenderedBestPlaced = bestPlaced;
+                        }
+
                         setAutoReport([
                             `Tentativa atual: ${attempt + 1}/${attempts}`,
-                            `Melhor resultado mantido na tela: ${best ? best.placed : 0}/${totalCargo}`,
+                            `Melhor resultado: ${bestPlaced}/${totalCargo}`,
+                            `Tempo decorrido: ${elapsedSec}s${maxMs > 0 ? ` / ${Math.round(maxMs / 1000)}s` : ''}`,
+                            `Modo da última tentativa: ${result.mode || 'tentativa'}`,
+                            `Planos elite guardados: ${(autoRuntime.eliteResults || []).length}/10`,
                             improvedBest ? 'Última tentativa virou a nova melhor.' : `Última tentativa foi descartada: ${result.placed}/${totalCargo}`,
-                            previousBestPlaced > 0 ? `Melhor anterior: ${previousBestPlaced}/${totalCargo}` : 'Trava ativa: tentativas piores não substituem o melhor plano.'
+                            previousBestPlaced > 0 ? `Melhor anterior: ${previousBestPlaced}/${totalCargo}` : 'Busca híbrida: parte começa do zero, parte repara os melhores planos.'
                         ], true);
                         lastYield = now;
                         await autoYield();
                     }
 
                     if (best && best.placed >= totalCargo) break;
+                    if (hitTimeLimit) {
+                        stoppedByTime = true;
+                        break;
+                    }
                 }
 
                 if (best && best.savedShip) {
@@ -2165,16 +2511,20 @@
 
                 const placed = best ? best.placed : 0;
                 const failureLines = best ? summarizeAutoFailures(best.failures) : [];
+                const elapsedSec = (getAutoElapsedMs() / 1000).toFixed(1);
                 const report = [
                     `Estivagem automática forte concluída.`,
                     `Melhor resultado: ${placed}/${totalCargo}.`,
                     `Tentativas executadas: ${executedAttempts}/${attempts}.`,
+                    `Planos elite guardados: ${(autoRuntime.eliteResults || []).length}/10.`,
+                    `Tempo total: ${elapsedSec}s.`,
+                    stoppedByTime ? 'Busca encerrada pelo limite de tempo definido.' : 'Busca encerrada pelo limite de tentativas ou por plano completo.',
                     ...failureLines.slice(0, 25)
                 ];
                 if (failureLines.length > 25) report.push(`... e mais ${failureLines.length - 25} grupos com sobra.`);
                 if (!failureLines.length && placed >= totalCargo) report.push('Todos os contêineres foram alocados.');
 
-                setAutoProgress(attempts, attempts, placed, totalCargo, placed >= totalCargo ? 'Plano completo encontrado.' : 'Busca encerrada com o melhor plano encontrado.');
+                setAutoProgress(executedAttempts, attempts, placed, totalCargo, placed >= totalCargo ? 'Plano completo encontrado.' : 'Busca encerrada com o melhor plano encontrado.');
                 setAutoReport(report, false);
                 alert(report.join('\n'));
             } catch (err) {
@@ -2183,6 +2533,8 @@
                 alert('Erro durante a estivagem automática: ' + (err && err.message ? err.message : err));
             } finally {
                 autoStowRunning = false;
+                autoRuntime.bestSnapshot = null;
+                autoRuntime.eliteResults = [];
                 if (btn) {
                     btn.disabled = false;
                     btn.innerText = '🧠 Estivar Automaticamente';
