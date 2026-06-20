@@ -310,7 +310,13 @@
         }
 
         .axis-title { text-align: center; font-size: 13px; font-weight: bold; letter-spacing: 2px; color: #444; margin-bottom: 2px;}
-        .axis-title-tier { writing-mode: horizontal-tb; transform: none; width: 14px; min-width: 14px; max-width: 14px; text-align: center; font-size: 13px; font-weight: bold; letter-spacing: 0; color: #444; margin-right: 5px; line-height: 1.05; word-break: break-all; white-space: normal; display: flex; align-items: center; justify-content: center; }
+        .axis-title-tier { 
+            writing-mode: horizontal-tb; transform: none; width: 24px; min-width: 24px; max-width: 24px; 
+            text-align: center; font-size: 12px; font-weight: bold; letter-spacing: 0; color: #444; 
+            margin-right: 5px; line-height: 1; word-break: normal; white-space: normal; 
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+        }
+        .axis-title-tier .tier-letter { display: block; height: 12px; line-height: 12px; }
         .bay-grid-flex { display: flex; align-items: center; }
 
         /* TRAVAS DE ALINHAMENTO MATEMÁTICO */
@@ -489,6 +495,15 @@
         .pdf-page .cell { border: 1px solid #111 !important; }
         .pdf-page .deck-separator-line { background-color: #000 !important; }
         .pdf-page .bay-container { border: 2px solid #aaa !important; box-shadow: none !important;}
+
+        .pdf-legend-page { justify-content: center; align-items: center; padding: 18mm; }
+        .pdf-legend-box { width: 230mm; border: 2px solid #111; padding: 16mm; border-radius: 8px; }
+        .pdf-legend-title { text-align: center; font-size: 28px; font-weight: 800; color: #111; margin-bottom: 6mm; letter-spacing: 1px; }
+        .pdf-legend-subtitle { text-align: center; font-size: 14px; color: #333; margin-bottom: 12mm; }
+        .pdf-legend-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10mm 12mm; }
+        .pdf-legend-item { display: flex; align-items: center; gap: 8mm; font-size: 16px; font-weight: 700; color: #111; }
+        .pdf-legend-color { width: 22mm; height: 16mm; border: 1.5px solid #111; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 900; color: #000; text-shadow: 0 0 3px rgba(255,255,255,0.95); }
+        .pdf-legend-port-name { font-size: 16px; font-weight: 700; }
 
     </style>
 </head>
@@ -1647,6 +1662,10 @@
             return `<div class="deck-separator${hiddenClass}" data-bay="${bayId}"><div class="deck-separator-line" style="${lineStyle}"></div>${splitGaps}</div>`;
         }
 
+        function getTierAxisLabelHtml() {
+            return '<span class="tier-letter">T</span><span class="tier-letter">I</span><span class="tier-letter">E</span><span class="tier-letter">R</span>';
+        }
+
         function generatePairHtml(bay1, bay2, isPrint = false) {
             const bays = Array.isArray(bay1) ? bay1 : [bay1, bay2].filter(Boolean);
             return `<div class="bay-pair-wrapper"><div class="pair-container">${bays.map(b => generateBayGridHtml(b, isPrint)).join('')}</div></div>`;
@@ -1656,11 +1675,11 @@
             let savedData = savedShip[bayId] || {}; let isEditable = currentState.editMode && !isPrint; let bayGrid = bayGrids[bayId];
             let bayHtml = `<div class="bay-container-wrapper" style="display: flex; flex-direction: column; align-items: center;"><h3 style="font-size: 24px; color: #111; margin: 0 0 10px 0; letter-spacing: 1px;">BAY ${bayId}</h3><div class="bay-container"><div class="axis-title">ROLL</div>`;
             
-            let colLabels = `<div class="roll-axis-row"><div class="axis-title-tier tier-title-spacer">TIER</div><div class="row-label" style="visibility: hidden; border: none; pointer-events: none;">00</div><div class="grid-row">`;
+            let colLabels = `<div class="roll-axis-row"><div class="axis-title-tier tier-title-spacer">${getTierAxisLabelHtml()}</div><div class="row-label" style="visibility: hidden; border: none; pointer-events: none;">00</div><div class="grid-row">`;
             bayGrid.cols.forEach(c => { colLabels += `<div class="axis-label" contenteditable="${isEditable ? 'true' : 'false'}" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" onblur="renameAxis('${bayId}', 'col', '${c}', this)">${c}</div>`; });
             colLabels += '</div></div>';
             
-            bayHtml += colLabels + `<div class="bay-grid-flex"><div class="axis-title-tier">TIER</div><div>`;
+            bayHtml += colLabels + `<div class="bay-grid-flex"><div class="axis-title-tier">${getTierAxisLabelHtml()}</div><div>`;
 
             const drawRows = (rowsArray, typeStr) => {
                 let section = '';
@@ -1711,7 +1730,7 @@
 
             bayHtml += drawRows(bayGrid.rowsAbove, 'row-above'); bayHtml += generateDeckSeparatorHtml(bayId); bayHtml += drawRows(bayGrid.rowsBelow, 'row-below');
             
-            let colFooter = `<div class="roll-axis-row"><div class="axis-title-tier tier-title-spacer">TIER</div><div class="row-label" style="visibility: hidden; border: none; pointer-events: none;">00</div><div class="grid-row">`;
+            let colFooter = `<div class="roll-axis-row"><div class="axis-title-tier tier-title-spacer">${getTierAxisLabelHtml()}</div><div class="row-label" style="visibility: hidden; border: none; pointer-events: none;">00</div><div class="grid-row">`;
             bayGrid.cols.forEach(c => { colFooter += `<div class="axis-label" contenteditable="${isEditable ? 'true' : 'false'}" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" onblur="renameAxis('${bayId}', 'col', '${c}', this)">${c}</div>`; });
             colFooter += '</div></div>';
             bayHtml += `</div></div>${colFooter}</div></div>`; 
@@ -4649,11 +4668,42 @@ Continuar?`)) return;
 
 
         // --- EXPORTAR PDF ---
+        function generatePdfLegendPage() {
+            const ports = [
+                { code: 'LB', name: 'Lisboa' },
+                { code: 'LH', name: 'Le Havre' },
+                { code: 'BA', name: 'Barcelona' },
+                { code: 'NA', name: 'Nápoles' },
+                { code: 'VE', name: 'Veneza' },
+                { code: 'TR', name: 'Trieste' }
+            ];
+
+            const items = ports.map(port => {
+                const color = getPortColorHex(port.code);
+                return `
+                    <div class="pdf-legend-item">
+                        <div class="pdf-legend-color" style="background-color: ${color} !important;">${port.code}</div>
+                        <div class="pdf-legend-port-name">${port.code} — ${port.name}</div>
+                    </div>
+                `;
+            }).join('');
+
+            return `
+                <div class="pdf-page pdf-legend-page">
+                    <div class="pdf-legend-box">
+                        <div class="pdf-legend-title">LEGENDA DE CORES</div>
+                        <div class="pdf-legend-subtitle">Portos de destino representados no plano de estivagem</div>
+                        <div class="pdf-legend-grid">${items}</div>
+                    </div>
+                </div>
+            `;
+        }
+
         async function generateRealPdf() {
             const loadingOverlay = document.getElementById('pdfLoadingOverlay'); const printArea = document.getElementById('printArea'); const mainEl = document.querySelector('main'); const headerEl = document.querySelector('header');
             loadingOverlay.style.display = 'flex'; printArea.innerHTML = ''; 
             
-            let fullHtml = ''; BAY_PAIRS.forEach(pair => { fullHtml += `<div class="pdf-page">${generatePairHtml(pair[0], pair[1], true)}</div>`; });
+            let fullHtml = generatePdfLegendPage(); BAY_PAIRS.forEach(pair => { fullHtml += `<div class="pdf-page">${generatePairHtml(pair[0], pair[1], true)}</div>`; });
             printArea.innerHTML = fullHtml; headerEl.style.display = 'none'; mainEl.style.display = 'none'; printArea.style.display = 'block';
 
             await new Promise(r => setTimeout(r, 500));
