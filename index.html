@@ -1668,6 +1668,40 @@
             return !isPhysicalPositionOccupied(bayId, row, col);
         }
 
+
+        function isStructurallyValidAutoSlot(bayId, row, col) {
+            const bay = normalizeBayBase(bayId);
+            const coord = `${row}-${col}`;
+            return !!(bayGrids[bay] && bayGrids[bay].cols.includes(col) && shipTopology[bay] && !shipTopology[bay][coord]);
+        }
+
+        function isSiblingStructurallyBlockedForAutoSlot(bayId, row, col) {
+            const bay = normalizeBayBase(bayId);
+            const sibling = getSiblingBay(bay);
+            if (!sibling) return false;
+            const coord = `${row}-${col}`;
+            if (!bayGrids[sibling] || !bayGrids[sibling].cols.includes(col)) return true;
+            if (!shipTopology[sibling] || shipTopology[sibling][coord]) return true;
+            return false;
+        }
+
+        function isSingleBayOnlyAutoSlot(bayId, row, col) {
+            const bay = normalizeBayBase(bayId);
+            const sibling = getSiblingBay(bay);
+            if (!sibling) return false;
+            if (!isStructurallyValidAutoSlot(bay, row, col)) return false;
+            // Um 40'/45' precisa da bay pareada. Se a pareada é casco/ausente/ocupada,
+            // este é um bom alvo para 20', porque o 20' ocupa só a bay atual.
+            if (isSiblingStructurallyBlockedForAutoSlot(bay, row, col)) return true;
+            return isPhysicalPositionOccupied(sibling, row, col);
+        }
+
+        function isHullLimitedSingleBayAutoSlot(bayId, row, col) {
+            const bay = normalizeBayBase(bayId);
+            if (!isStructurallyValidAutoSlot(bay, row, col)) return false;
+            return isSiblingStructurallyBlockedForAutoSlot(bay, row, col);
+        }
+
         function isStackPairCompatible(topInv, bottomInv) {
             if (!topInv || !bottomInv) return true;
             const topPol = getOrderIndex(POL_ORDER, topInv.pol);
@@ -1776,7 +1810,11 @@
             if (hasMod(inv, 'oh')) score -= level * 15;
             if (hasMod(inv, 'ow')) score += center * 10;
             if (inv.size === '40' || inv.size === '45') score -= 80;
-            if (inv.size === '20') score += 30;
+            if (inv.size === '20') {
+                score += 30;
+                if (isSingleBayOnlyAutoSlot(bayId, row, col)) score -= 5200;
+                if (isHullLimitedSingleBayAutoSlot(bayId, row, col)) score -= 2600;
+            }
 
             score += bayNum * 0.2;
             return score;
@@ -1827,6 +1865,8 @@
             const positions = getAutoPositionList(inv);
             for (let i = 0; i < positions.length; i++) {
                 const pos = positions[i];
+                if (options.singleBayOnly && !isSingleBayOnlyAutoSlot(pos.bayId, pos.row, pos.col)) continue;
+                if (options.hullLimitedOnly && !isHullLimitedSingleBayAutoSlot(pos.bayId, pos.row, pos.col)) continue;
                 if (shouldProtectCriticalAutoPosition(inv, pos, options)) continue;
                 const validation = validateAutoPlacement(inv, pos.bayId, pos.row, pos.col);
                 if (validation.ok) candidates.push({ bayId: pos.bayId, row: pos.row, col: pos.col, score: scoreAutoCandidate(inv, pos.bayId, pos.row, pos.col) });
@@ -2320,6 +2360,8 @@
             if (reasonText.includes("20' sobre 40") || reasonText.includes("40'/45")) hints.push("há conflito forte entre empilhamento de 20' e bases de 40'/45'.");
             if (reasonText.includes('ow') || reasonText.includes('oh') || reasonText.includes('ol')) hints.push('as cargas fora de medida estão bloqueando posições vizinhas/acima ou exigindo espaços livres difíceis.');
             if (reasonText.includes('ocupada/oculta')) hints.push("o gargalo principal parece ser espaço físico disponível ou posições bloqueadas por 40'/45'/OL.");
+            const capacityNow = buildAutoCapacityDiagnostics();
+            if (capacityNow.singleBaySlots > 0) hints.push(`há ${capacityNow.singleBaySlots} slot(s) em que 40'/45' tende a falhar por falta da bay pareada; o novo modo prioriza 20' nesses espaços.`);
             if (hints.length) {
                 lines.push('Leitura provável:');
                 hints.slice(0, 5).forEach(h => lines.push(`- ${h}`));
@@ -2365,6 +2407,17 @@
             return seen.size;
         }
 
+
+        function countAutoSingleBayOnlySlots(positionList, hullOnly = false) {
+            const seen = new Set();
+            (positionList || []).forEach(pos => {
+                const bay = normalizeBayBase(pos.bayId);
+                if (hullOnly ? !isHullLimitedSingleBayAutoSlot(bay, pos.row, pos.col) : !isSingleBayOnlyAutoSlot(bay, pos.row, pos.col)) return;
+                seen.add(`${bay}-${pos.row}-${pos.col}`);
+            });
+            return seen.size;
+        }
+
         function buildAutoCapacityDiagnostics() {
             const cache = buildAutoPositionCache();
             const demand = getAutoDemandSummary();
@@ -2375,6 +2428,8 @@
             const reeferHold = countAutoTheoreticalSlots((cache.reefer || []).filter(p => isHoldRow(p.bayId, p.row)));
             const imoNA = countAutoTheoreticalSlots(cache.imoNA || []);
             const imoLH = countAutoTheoreticalSlots(cache.imoLH || []);
+            const singleBaySlots = countAutoSingleBayOnlySlots(normalPositions, false);
+            const hullSingleBaySlots = countAutoSingleBayOnlySlots(normalPositions, true);
             return {
                 demand,
                 totalSlots20: deckSlots + holdSlots,
@@ -2385,8 +2440,11 @@
                 reeferHold,
                 imoNA,
                 imoLH,
+                singleBaySlots,
+                hullSingleBaySlots,
                 lines: [
                     `Capacidade teórica aproximada em slots de 20': total ${deckSlots + holdSlots} (${deckSlots} convés, ${holdSlots} porão).`,
+                    `Slots bons para 20' por limitação de bay pareada: ${singleBaySlots} (${hullSingleBaySlots} por casco/ausência estrutural da bay vizinha).`,
                     `Reefer: demanda ${demand.reefer}; slots reefer teóricos ${reeferDeck + reeferHold} (${reeferDeck} convés, ${reeferHold} porão).`,
                     `IMO: demanda NA ${demand.imoNA}/slots convés bay 01 ${imoNA}; demanda LH ${demand.imoLH}/slots convés bay 11 ${imoLH}.`,
                     `Carga sensível: ${demand.fortyLike} contêiner(es) 40'/45', ${demand.twenty} contêiner(es) 20', ${demand.odd} fora de medida, ${demand.tank} tank, ${demand.empty} empty.`
@@ -2404,6 +2462,40 @@
             if (!chosen) return null;
             commitAutoPlacement(inv, chosen.bayId, chosen.row, chosen.col);
             return chosen;
+        }
+
+
+        function tryFillAutoSingleBayTwentySlots(attemptIndex, rng, options = {}) {
+            let placed = 0;
+            let placementScore = 0;
+            const preferHull = attemptIndex % 3 !== 1;
+            const units = buildAutoRemainingUnits(attemptIndex, rng)
+                .filter(inv => inv && inv.size === '20')
+                .sort((a, b) => {
+                    // 20' carregados e não-vazios primeiro; empty fica para arremate.
+                    const ea = isEmptyInventory(a) ? 1 : 0;
+                    const eb = isEmptyInventory(b) ? 1 : 0;
+                    if (ea !== eb) return ea - eb;
+                    return getAutoUnitPriority(a, attemptIndex, rng) - getAutoUnitPriority(b, attemptIndex, rng);
+                });
+
+            for (let inv of units) {
+                const candidates = getAutoCandidates(inv, {
+                    protectCritical: !!options.protectCritical,
+                    singleBayOnly: true,
+                    hullLimitedOnly: !!options.hullLimitedOnly || preferHull
+                });
+                let chosen = chooseAutoCandidate(candidates, inv, attemptIndex, rng);
+                if (!chosen && (options.hullLimitedOnly || preferHull)) {
+                    const fallback = getAutoCandidates(inv, { protectCritical: !!options.protectCritical, singleBayOnly: true });
+                    chosen = chooseAutoCandidate(fallback, inv, attemptIndex, rng);
+                }
+                if (!chosen) continue;
+                commitAutoPlacement(inv, chosen.bayId, chosen.row, chosen.col);
+                placementScore += chosen.score - 3000;
+                placed++;
+            }
+            return { placed, score: placementScore };
         }
 
         function buildAutoRemainingUnits(attemptIndex, rng, priorityIds = null) {
@@ -2451,6 +2543,9 @@
                 if (chosen) placementScore += chosen.score;
             });
 
+            const gapBefore = tryFillAutoSingleBayTwentySlots(attemptIndex, rng, { protectCritical: true, hullLimitedOnly: true });
+            placementScore += gapBefore.score;
+
             // Enquanto ainda houver especial sobrando, cargas comuns não gastam as bays críticas.
             const criticalStillLeft = globalInventory.some(inv => isCriticalAutoCargo(inv) && ((parseInt(inv.qty, 10) || 0) > (parseInt(inv.placed, 10) || 0)));
             rest.forEach(inv => {
@@ -2458,7 +2553,10 @@
                 if (chosen) placementScore += chosen.score;
             });
 
-            return finishAutoAttemptResult(attemptIndex, placementScore, 'reserva rígida');
+            const gapAfter = tryFillAutoSingleBayTwentySlots(attemptIndex, rng, { protectCritical: false });
+            placementScore += gapAfter.score;
+
+            return finishAutoAttemptResult(attemptIndex, placementScore, 'reserva rígida + 20 em slots de casco');
         }
 
         function getAutoStackUnitBias(inv, bayId, row, col, attemptIndex, rng) {
@@ -2480,6 +2578,8 @@
                 if (hasMod(inv, 'oh')) score -= level * 160;
             }
 
+            if (inv.size === '20' && isSingleBayOnlyAutoSlot(bayId, row, col)) score -= 5200;
+            if (inv.size === '20' && isHullLimitedSingleBayAutoSlot(bayId, row, col)) score -= 2600;
             if (isReeferInventory(inv) && REEFER_BAYS.includes(normalizeBayBase(bayId))) score -= 600;
             if (isImoInventory(inv) && isDeckRow(bayId, row)) score -= 800;
             score += (rng() - 0.5) * (attemptIndex % 2 ? 900 : 300);
@@ -2543,6 +2643,9 @@
                 if (!remaining.length) break;
             }
 
+            const gapStack = tryFillAutoSingleBayTwentySlots(attemptIndex, rng, { protectCritical: false });
+            placementScore += gapStack.score;
+
             // Segunda passada contêiner por contêiner para aproveitar buracos que a montagem por pilha deixou.
             remaining = buildAutoRemainingUnits(attemptIndex, rng);
             remaining.forEach(inv => {
@@ -2551,6 +2654,40 @@
             });
 
             return finishAutoAttemptResult(attemptIndex, placementScore, 'pilha por pilha + preenchimento');
+        }
+
+        function runTwentyGapFocusedAutoAttempt(attemptIndex) {
+            clearAutoStowedCargoOnly();
+            const seed = ((Date.now() & 0xffffffff) ^ Math.imul(attemptIndex + 59, 374761393)) >>> 0;
+            const rng = createAutoRng(seed);
+            const units = buildAutoUnitOrder(attemptIndex, rng);
+            const critical = units.filter(isCriticalAutoCargo);
+            const large = units.filter(inv => !isCriticalAutoCargo(inv) && (inv.size === '40' || inv.size === '45'));
+            const rest = units.filter(inv => !isCriticalAutoCargo(inv) && inv.size !== '40' && inv.size !== '45');
+            let placementScore = 0;
+
+            critical.forEach(inv => {
+                const chosen = tryPlaceAutoUnit(inv, attemptIndex, rng, { protectCritical: false });
+                if (chosen) placementScore += chosen.score;
+            });
+
+            large.forEach(inv => {
+                const chosen = tryPlaceAutoUnit(inv, attemptIndex, rng, { protectCritical: attemptIndex % 3 !== 0 });
+                if (chosen) placementScore += chosen.score;
+            });
+
+            const gapFirst = tryFillAutoSingleBayTwentySlots(attemptIndex, rng, { protectCritical: true, hullLimitedOnly: true });
+            placementScore += gapFirst.score;
+
+            rest.forEach(inv => {
+                const chosen = tryPlaceAutoUnit(inv, attemptIndex, rng, { protectCritical: attemptIndex % 4 !== 0 });
+                if (chosen) placementScore += chosen.score;
+            });
+
+            const gapLast = tryFillAutoSingleBayTwentySlots(attemptIndex, rng, { protectCritical: false });
+            placementScore += gapLast.score;
+
+            return finishAutoAttemptResult(attemptIndex, placementScore, "20' em espaços de uma bay");
         }
 
         function collectCurrentAutoPlacements() {
@@ -2663,9 +2800,9 @@
             (seedResult.failures || []).map(normalizeAutoFailureRecord).forEach(f => { if (f.invId) priorityIds.add(f.invId); });
             repairInfo.removed.forEach(inv => { if (inv && inv.id) priorityIds.add(inv.id); });
 
-            // A pontuação do reparo é recalculada apenas pelos movimentos da tentativa atual.
-            // O critério principal continua sendo quantidade alocada; isso evita prender o reparo a um score antigo.
-            let placementScore = 0;
+            let placementScore = seedResult.placementScore || 0;
+            const gapRepair = tryFillAutoSingleBayTwentySlots(attemptIndex, rng, { protectCritical: true });
+            placementScore += gapRepair.score;
             const units = buildAutoRemainingUnits(attemptIndex, rng, priorityIds);
             units.forEach(inv => {
                 const protectCritical = priorityIds.size > 0 && !priorityIds.has(inv.id) && (attemptIndex % 4 !== 0);
@@ -2684,6 +2821,7 @@
             const mode = attemptIndex % 10;
             if (hasElite && (mode === 2 || mode === 5 || mode === 8)) return runDirectedRepairAutoAttempt(attemptIndex, elitePool, bestResult);
             if (mode === 1 || mode === 6) return runStackAutoAttempt(attemptIndex);
+            if (mode === 4 || mode === 9) return runTwentyGapFocusedAutoAttempt(attemptIndex);
             if (mode === 3 || mode === 7) return runReservedAutoAttempt(attemptIndex);
             return runSingleAutoAttempt(attemptIndex);
         }
@@ -2723,7 +2861,10 @@
                 if (chosen) placementScore += chosen.score;
             }
 
-            return finishAutoAttemptResult(attemptIndex, placementScore, 'contêiner por contêiner');
+            const gapSingle = tryFillAutoSingleBayTwentySlots(attemptIndex, rng, { protectCritical: false });
+            placementScore += gapSingle.score;
+
+            return finishAutoAttemptResult(attemptIndex, placementScore, 'contêiner por contêiner + 20 em gaps');
         }
 
         function captureAutoResultSnapshot(result) {
