@@ -561,7 +561,7 @@
                                 <input type="number" id="autoUiInterval" min="1" max="500" step="5" value="25">
                             </label>
                         </div>
-                        <div class="auto-stow-hint">0 s = sem limite de tempo. Combina reefer porão-first, auditoria de apoio, proteção bay 33, pilha por pilha, contêiner por contêiner e reparo elite. A regra de POD voltou a ser rígida; a tela só atualiza de tempos em tempos para ganhar velocidade.</div>
+                        <div class="auto-stow-hint">0 s = sem limite de tempo. Combina reefer porão-first com correção de apoio em degrau, espinha dorsal POL cedo/POD tardio, proteção bay 33, pilha por pilha, contêiner por contêiner e reparo elite. A regra de POD voltou a ser rígida; a tela só atualiza de tempos em tempos para ganhar velocidade.</div>
                         <div class="auto-bg-row">
                             <label><input type="checkbox" id="autoBackgroundMode" checked> Continuar rodando ao sair da aba/tela</label>
                             <div id="autoBackgroundStatus" class="auto-bg-status">Enquanto a aba continuar aberta, a busca segue em segundo plano. Se fechar o navegador, ela para.</div>
@@ -1607,7 +1607,16 @@
             if (isBaseRowInSection(bay, row)) return true;
             const below = getRowBelow(bay, row);
             if (!below) return true;
-            return getPhysicalFootprintBays(bay, inv).every(b => isPhysicalPositionOccupied(b, below, col));
+
+            // Correção importante para porões com casco em degraus:
+            // se a célula imediatamente abaixo não existe estruturalmente para aquela parte da pegada,
+            // a posição atual é o primeiro slot utilizável daquela coluna e deve contar como apoiada.
+            // Antes o código exigia um contêiner abaixo mesmo quando o casco ocultava 02/04/06,
+            // gerando muitos falsos "contêiner voando" e deixando o porão reefer vazio.
+            return getPhysicalFootprintBays(bay, inv).every(b => {
+                if (!isStructurallyValidAutoSlot(b, below, col)) return true;
+                return isPhysicalPositionOccupied(b, below, col);
+            });
         }
 
         function getVerticalLevelFromBottom(bayId, row) {
@@ -2479,7 +2488,7 @@
                 lines.push(`Uso do porão no melhor plano: ${holdUse.totalHold} contêiner(es) no porão; ${holdUse.reeferHold} reefer(s) no porão; ${holdUse.latePodHold} com destino tardio no porão.`);
                 const reefAudit = analyzeAutoEmptyReeferFootprints(bestResult && bestResult.savedShip ? bestResult.savedShip : null);
                 lines.push(`Auditoria reefer 40': espaços vazios estruturais — porão ${reefAudit.emptyHold40} (${reefAudit.supportedHold40} já com apoio), convés ${reefAudit.emptyDeck40} (${reefAudit.supportedDeck40} já com apoio).`);
-                lines.push('Nesta versão, os reefers são resolvidos primeiro como subproblema próprio: porão por coluna, depois convés, sem remoções.');
+                lines.push('Nesta versão, os reefers são resolvidos primeiro como subproblema próprio: porão por coluna com apoio em degrau de casco e espinha dorsal POL cedo/POD tardio, depois convés, sem remoções.');
             } catch(e) {
                 lines.push('Não foi possível calcular a capacidade teórica nesta execução.');
             }
@@ -2661,6 +2670,36 @@
             return lanes;
         }
 
+        function isEarlyLoadLateDischargeReefer(inv) {
+            if (!isReeferInventory(inv)) return false;
+            const polIdx = getOrderIndex(POL_ORDER, inv.pol);
+            const podIdx = getOrderIndex(POD_ORDER, inv.pod);
+            // "Embarca cedo e descarrega tarde": é o melhor lastro lógico para formar base de pilhas.
+            // RG/PG/ST com NA/VE/TR, e BA em tentativas alternadas como transição.
+            return polIdx <= 2 && podIdx >= 3;
+        }
+
+        function getReeferBackboneBias(inv, bayId, row, section, attemptIndex) {
+            if (!isReeferInventory(inv)) return 0;
+            const level = getVerticalLevelFromBottom(bayId, row);
+            const podIdx = getOrderIndex(POD_ORDER, inv.pod);
+            const polIdx = getOrderIndex(POL_ORDER, inv.pol);
+            let bias = 0;
+
+            if (section === 'hold') {
+                // Porão: procurar formar as maiores pilhas possíveis com base em cargas que entram cedo
+                // e saem tarde. Isso cria suporte e deixa as cargas de LH/LB/BA disponíveis acima.
+                if (isEarlyLoadLateDischargeReefer(inv)) bias -= 12000 + Math.max(0, 3 - polIdx) * 900 + Math.max(0, podIdx - 2) * 900;
+                if (inv.pod === 'BA' && polIdx <= 2 && attemptIndex % 2 === 0) bias -= 4500;
+                if ((inv.pod === 'LH' || inv.pod === 'LB') && level <= 1) bias += 8500;
+                if ((inv.pod === 'LH' || inv.pod === 'LB') && level >= 2) bias -= 2200;
+            } else {
+                if (inv.pod === 'LH' || inv.pod === 'LB') bias -= 5000;
+                if (isEarlyLoadLateDischargeReefer(inv)) bias += 2500;
+            }
+            return bias;
+        }
+
         function getAutoReeferExactSlotScore(inv, bayId, row, col, section, attemptIndex, rng) {
             const rows = getRowsOfSameSection(bayId, row);
             const level = getVerticalLevelFromBottom(bayId, row);
@@ -2693,6 +2732,8 @@
                 if (inv.pod === 'BA') score -= 650;
                 if (inv.pod === 'TR' || inv.pod === 'VE') score += 750;
             }
+
+            score += getReeferBackboneBias(inv, bayId, row, section, attemptIndex);
 
             // Leve preferência para compactar por colunas centrais, mas sem impedir uso lateral.
             score += center * 8;
@@ -2810,7 +2851,10 @@
                 if (isBaseRowInSection(bayId, row)) return true;
                 const below = getRowBelow(bayId, row);
                 if (!below) return true;
-                return getPhysicalFootprintBays(bayId, inv).every(b => sourceOccupied(b, below, col));
+                return getPhysicalFootprintBays(bayId, inv).every(b => {
+                    if (!isStructurallyValidAutoSlot(b, below, col)) return true;
+                    return sourceOccupied(b, below, col);
+                });
             };
 
             REEFER_BAYS.forEach(bayId => {
@@ -2908,8 +2952,10 @@
 
             // Fase 1 — REEFER ONLY / PORÃO FIRST REAL:
             // monta colunas físicas de 40' no porão, de baixo para cima, antes de qualquer convés.
+            // A prioridade agora é formar "espinha dorsal": POL cedo + POD tardio na base,
+            // abrindo pilhas altas para LH/LB/BA acima.
             const hold = fillAutoReeferColumnsFromPool(pool, 'hold', attemptIndex, rng, audit);
-            placementScore += hold.score - hold.placed * 9000;
+            placementScore += hold.score - hold.placed * 14000;
 
             // Fase 2 — só depois usa o convés, também por coluna/base para evitar buracos.
             const deck = fillAutoReeferColumnsFromPool(pool, 'deck', attemptIndex, rng, audit);
