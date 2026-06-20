@@ -260,6 +260,9 @@
         .separator-editor-handle::after { content: '↔'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #fff; font-weight: bold; }
         .separator-editor-scale { display: flex; justify-content: space-between; font-size: 9px; color: #777; margin-top: 4px; }
         .separator-editor-help { font-size: 10px; color: #555; text-align: center; margin-top: 6px; line-height: 1.25; }
+        .separator-toggle-status { font-size: 10px; color: #555; text-align: center; margin-top: 6px; line-height: 1.25; font-weight: bold; }
+        .separator-toggle-status.off { color: #b00020; }
+        .deck-separator-hidden { display: none !important; height: 0 !important; margin: 0 !important; padding: 0 !important; }
 
         .inventory-container { flex: 1; overflow-y: auto; background: #fff; }
         .inventory-header { padding: 10px 15px; background: #1a2a3a; color: white; font-size: 12px; font-weight: bold; position: sticky; top: 0; z-index: 10; display:flex; justify-content: space-between; align-items:center;}
@@ -307,7 +310,7 @@
         }
 
         .axis-title { text-align: center; font-size: 13px; font-weight: bold; letter-spacing: 2px; color: #444; margin-bottom: 2px;}
-        .axis-title-tier { writing-mode: vertical-rl; transform: rotate(180deg); text-align: center; font-size: 13px; font-weight: bold; letter-spacing: 2px; color: #444; margin-right: 5px;}
+        .axis-title-tier { writing-mode: horizontal-tb; transform: none; width: 14px; min-width: 14px; max-width: 14px; text-align: center; font-size: 13px; font-weight: bold; letter-spacing: 0; color: #444; margin-right: 5px; line-height: 1.05; word-break: break-all; white-space: normal; display: flex; align-items: center; justify-content: center; }
         .bay-grid-flex { display: flex; align-items: center; }
 
         /* TRAVAS DE ALINHAMENTO MATEMÁTICO */
@@ -596,6 +599,13 @@
                     <hr style="border: none; border-top: 1px solid #ffcaca; margin: 12px 0;">
 
                     <div class="grid-edit-row">
+                        <span>Barra porão/convés</span>
+                        <div class="grid-edit-btns">
+                            <button id="btnToggleDeckSeparator">Ocultar/Mostrar</button>
+                        </div>
+                    </div>
+                    <div id="deckSeparatorVisibilityStatus" class="separator-toggle-status">Barra visível</div>
+                    <div class="grid-edit-row">
                         <span>Divisões arrastáveis da barra: <strong id="deckSeparatorCount">1</strong></span>
                         <div class="grid-edit-btns">
                             <button id="btnRemDeckSplit">-</button>
@@ -719,7 +729,7 @@
                 cols: [...COLS_DEFAULT],
                 rowsAbove: [...ROWS_ABOVE_DEFAULT],
                 rowsBelow: [...ROWS_BELOW_DEFAULT],
-                deckSeparator: { divisions: 1, positions: [], startPct: 0, endPct: 100 }
+                deckSeparator: { divisions: 1, positions: [], startPct: 0, endPct: 100, visible: true }
             };
         }
 
@@ -774,6 +784,7 @@
             grid.deckSeparator.divisions = Math.max(1, parseInt(grid.deckSeparator.divisions) || 1);
             if (grid.deckSeparator.startPct === undefined) grid.deckSeparator.startPct = 0;
             if (grid.deckSeparator.endPct === undefined) grid.deckSeparator.endPct = 100;
+            if (grid.deckSeparator.visible === undefined) grid.deckSeparator.visible = true;
 
             // Compatibilidade com backups antigos que guardavam apenas os espaços em px.
             if (!Array.isArray(grid.deckSeparator.positions)) {
@@ -1080,6 +1091,26 @@
                 let bayId = document.getElementById('editGridBaySelect').value;
                 updateDeckSeparatorDivisions(bayId, -1);
             });
+
+            const toggleDeckSeparatorBtn = document.getElementById('btnToggleDeckSeparator');
+            if (toggleDeckSeparatorBtn) toggleDeckSeparatorBtn.addEventListener('click', () => {
+                let bayId = document.getElementById('editGridBaySelect').value;
+                toggleDeckSeparatorVisibility(bayId);
+            });
+        }
+
+        function toggleDeckSeparatorVisibility(bayId) {
+            if (!bayId || !bayGrids[bayId]) return;
+            ensureDeckSeparatorConfig(bayGrids[bayId]);
+            const nextVisible = !bayGrids[bayId].deckSeparator.visible;
+            getTwinBays(bayId).forEach(t => {
+                if (!bayGrids[t]) return;
+                ensureDeckSeparatorConfig(bayGrids[t]);
+                bayGrids[t].deckSeparator.visible = nextVisible;
+            });
+            persistData();
+            updateDeckSeparatorGapControls();
+            renderBayPairsUI();
         }
 
         function updateDeckSeparatorDivisions(bayId, delta) {
@@ -1153,6 +1184,7 @@
                 ensureDeckSeparatorConfig(bayGrids[t]);
                 const cfg = bayGrids[t].deckSeparator;
                 document.querySelectorAll(`.deck-separator[data-bay="${t}"]`).forEach(separator => {
+                    separator.classList.toggle('deck-separator-hidden', cfg.visible === false);
                     const lineEl = separator.querySelector('.deck-separator-line');
                     if (lineEl) {
                         lineEl.style.left = `${cfg.startPct}%`;
@@ -1256,6 +1288,11 @@
             ensureDeckSeparatorConfig(bayGrids[bayId]);
             const cfg = bayGrids[bayId].deckSeparator;
             countEl.textContent = cfg.divisions;
+            const visibilityStatus = document.getElementById('deckSeparatorVisibilityStatus');
+            if (visibilityStatus) {
+                visibilityStatus.textContent = cfg.visible === false ? 'Barra removida completamente nesta bay' : 'Barra visível nesta bay';
+                visibilityStatus.classList.toggle('off', cfg.visible === false);
+            }
 
             const handlesHtml = cfg.positions.map((pos, idx) => `
                 <div class="separator-editor-gap-preview" data-split-idx="${idx}" style="left: ${pos}%;"></div>
@@ -1271,7 +1308,7 @@
                         ${handlesHtml}
                     </div>
                     <div class="separator-editor-scale"><span>Início</span><span>Centro</span><span>Fim</span></div>
-                    <div class="separator-editor-help">Arraste as alças escuras para encurtar ou alongar a barra. Arraste as alças laranjas para mover as divisões internas.</div>
+                    <div class="separator-editor-help">Arraste as alças escuras para encurtar/alongar. Alças laranjas movem divisões. Use Ocultar/Mostrar para remover a barra completamente.</div>
                 </div>
             `;
 
@@ -1606,7 +1643,8 @@
             const cfg = bayGrids[bayId].deckSeparator;
             const splitGaps = cfg.positions.map((pos, idx) => `<div class="deck-separator-gap" data-split-idx="${idx}" style="left: ${pos}%;"></div>`).join('');
             const lineStyle = `left: ${cfg.startPct}%; width: ${cfg.endPct - cfg.startPct}%;`;
-            return `<div class="deck-separator" data-bay="${bayId}"><div class="deck-separator-line" style="${lineStyle}"></div>${splitGaps}</div>`;
+            const hiddenClass = cfg.visible === false ? ' deck-separator-hidden' : '';
+            return `<div class="deck-separator${hiddenClass}" data-bay="${bayId}"><div class="deck-separator-line" style="${lineStyle}"></div>${splitGaps}</div>`;
         }
 
         function generatePairHtml(bay1, bay2, isPrint = false) {
@@ -1648,8 +1686,9 @@
                                     let isReeferBay = bayId.includes('REEFER');
 
                                     if ((isImoBay && !isImoContainer) || (isReeferBay && !isReeferContainer)) {
-                                        // Ocupado na gêmea, mas não pertence a esta planta de visualização
-                                        contentHtml = `<div class="layer base-blocked_twin" title="Ocupado por carga diferente na planta Standard"></div>`;
+                                        // Ocupado fisicamente na gêmea, mas não pertence a esta planta de visualização.
+                                        // Nas plantas IMO/REEFER, a célula fica em branco para não mostrar o símbolo ⇄.
+                                        contentHtml = '';
                                         bgColorStyle = isPrint ? 'background-color: #ffffff !important;' : 'background-color: var(--port-empty);';
                                     } else {
                                         // Pertence à planta, desenha normalmente
@@ -2604,6 +2643,80 @@
             return stats;
         }
 
+
+        function getPlacedLocationsForCargoLabel(label, snapshot = null) {
+            const source = snapshot || savedShip;
+            const seen = new Set();
+            const locations = [];
+            Object.keys(source || {}).forEach(bayId => {
+                const base = normalizeBayBase(bayId);
+                const data = source[bayId] || {};
+                Object.keys(data).forEach(coord => {
+                    const cell = data[coord];
+                    if (!cell || cell.invId === undefined) return;
+                    const inv = getInventoryByIdFast(cell.invId);
+                    if (!inv || getAutoCargoLabel(inv) !== label) return;
+                    const unique = `${cell.invId}-${base}-${coord}`;
+                    if (seen.has(unique)) return;
+                    seen.add(unique);
+                    const [row, col] = coord.split('-');
+                    locations.push({ bay: base, row, col, inv });
+                });
+            });
+            locations.sort((a, b) => {
+                const bayCmp = parseInt(a.bay, 10) - parseInt(b.bay, 10);
+                if (bayCmp) return bayCmp;
+                const rowCmp = parseInt(a.row, 10) - parseInt(b.row, 10);
+                if (rowCmp) return rowCmp;
+                return parseInt(a.col, 10) - parseInt(b.col, 10);
+            });
+            return locations;
+        }
+
+        function formatAutoLocationSample(locations, limit = 36) {
+            if (!locations || !locations.length) return 'nenhum igual estivado no melhor plano';
+            const byBay = {};
+            locations.forEach(loc => {
+                if (!byBay[loc.bay]) byBay[loc.bay] = [];
+                byBay[loc.bay].push(`${loc.row}-${loc.col}`);
+            });
+            const parts = [];
+            let used = 0;
+            Object.keys(byBay).sort((a, b) => parseInt(a, 10) - parseInt(b, 10)).forEach(bay => {
+                if (used >= limit) return;
+                const coords = byBay[bay].slice(0, Math.max(0, limit - used));
+                used += coords.length;
+                parts.push(`Bay ${bay}: ${coords.join(', ')}`);
+            });
+            const remaining = locations.length - Math.min(locations.length, limit);
+            return parts.join(' | ') + (remaining > 0 ? ` | +${remaining} posição(ões)` : '');
+        }
+
+        function buildAutoUnplacedDetailLines(failures, snapshot = null, limitGroups = 30) {
+            const grouped = {};
+            (failures || []).map(normalizeAutoFailureRecord).forEach(f => {
+                const label = f.label || getAutoCargoLabel(f);
+                if (!grouped[label]) grouped[label] = { count: 0, reasonCounts: {}, sample: f };
+                grouped[label].count += f.qty || 1;
+                Object.entries(f.reasonCounts || {}).forEach(([reason, count]) => incrementAutoCount(grouped[label].reasonCounts, reason, count));
+                if (!Object.keys(f.reasonCounts || {}).length && f.mainReason) incrementAutoCount(grouped[label].reasonCounts, f.mainReason, f.qty || 1);
+            });
+
+            return Object.entries(grouped)
+                .sort((a, b) => b[1].count - a[1].count)
+                .slice(0, limitGroups)
+                .flatMap(([label, data]) => {
+                    const reasons = getTopAutoCounts(data.reasonCounts, 4);
+                    const reasonText = reasons.length ? reasons.map(([k, v]) => `${k} (${v})`).join(', ') : 'motivo não identificado';
+                    const locations = getPlacedLocationsForCargoLabel(label, snapshot);
+                    return [
+                        `${data.count} não alocado(s): ${label}`,
+                        `  Motivos principais: ${reasonText}.`,
+                        `  Iguais já estivados (${locations.length}): ${formatAutoLocationSample(locations)}.`
+                    ];
+                });
+        }
+
         function buildAutoDifficultyReport(bestResult, totalCargo, executedAttempts, requestedAttempts, stopReason = '') {
             const failures = (bestResult && bestResult.failures ? bestResult.failures : []).map(normalizeAutoFailureRecord);
             const placed = bestResult ? bestResult.placed : 0;
@@ -2692,6 +2805,9 @@
             getTopAutoCounts(byCargo, 30).forEach(([label, count]) => lines.push(`${count} não alocado(s): ${label}`));
             const hidden = Object.keys(byCargo).length - Math.min(Object.keys(byCargo).length, 30);
             if (hidden > 0) lines.push(`... e mais ${hidden} grupo(s) de sobra.`);
+            lines.push('');
+            lines.push('Detalhamento para conferência manual:');
+            buildAutoUnplacedDetailLines(failures, bestResult && bestResult.savedShip ? bestResult.savedShip : null, 30).forEach(line => lines.push(line));
             return lines;
         }
 
