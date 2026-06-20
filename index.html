@@ -560,11 +560,8 @@
                             <label>Atualizar tela a cada
                                 <input type="number" id="autoUiInterval" min="1" max="500" step="5" value="25">
                             </label>
-                            <label>Máx. remoções
-                                <input type="number" id="autoRemovalBudget" min="0" max="50" step="1" value="12">
-                            </label>
                         </div>
-                        <div class="auto-stow-hint">0 s = sem limite de tempo. Combina porão-first seletivo, reefer-first, proteção bay 33, pilha por pilha, contêiner por contêiner, reparo elite e remoções controladas por POD. A tela só atualiza de tempos em tempos para ganhar velocidade.</div>
+                        <div class="auto-stow-hint">0 s = sem limite de tempo. Combina reefer porão-first, auditoria de apoio, proteção bay 33, pilha por pilha, contêiner por contêiner e reparo elite. A regra de POD voltou a ser rígida; a tela só atualiza de tempos em tempos para ganhar velocidade.</div>
                         <div class="auto-bg-row">
                             <label><input type="checkbox" id="autoBackgroundMode" checked> Continuar rodando ao sair da aba/tela</label>
                             <div id="autoBackgroundStatus" class="auto-bg-status">Enquanto a aba continuar aberta, a busca segue em segundo plano. Se fechar o navegador, ela para.</div>
@@ -1600,6 +1597,19 @@
             return rows[idx - 1];
         }
 
+        function isBaseRowInSection(bayId, row) {
+            const rows = getRowsOfSameSection(bayId, row);
+            return rows.length > 0 && rows.indexOf(row) === rows.length - 1;
+        }
+
+        function hasRequiredAutoSupport(bayId, row, col, inv) {
+            const bay = normalizeBayBase(bayId);
+            if (isBaseRowInSection(bay, row)) return true;
+            const below = getRowBelow(bay, row);
+            if (!below) return true;
+            return getPhysicalFootprintBays(bay, inv).every(b => isPhysicalPositionOccupied(b, below, col));
+        }
+
         function getVerticalLevelFromBottom(bayId, row) {
             const rows = getRowsOfSameSection(bayId, row);
             const idx = rows.indexOf(row);
@@ -1707,46 +1717,34 @@
         }
 
         function getAutoStackRelation(topInv, bottomInv) {
-            if (!topInv || !bottomInv) return { ok: true, removalCost: 0, polOk: true, podOk: true };
+            if (!topInv || !bottomInv) return { ok: true, removalCost: 0, polOk: true, podOk: true, reason: '' };
             const topPol = getOrderIndex(POL_ORDER, topInv.pol);
             const bottomPol = getOrderIndex(POL_ORDER, bottomInv.pol);
             const topPod = getOrderIndex(POD_ORDER, topInv.pod);
             const bottomPod = getOrderIndex(POD_ORDER, bottomInv.pod);
 
-            // POL continua sendo regra dura: quem fica em cima precisa carregar no mesmo porto ou depois.
+            // Sem remoções nesta versão: POL e POD voltam a ser regras rígidas de empilhamento.
+            // Em cima: carrega no mesmo POL ou depois; descarrega no mesmo POD ou antes.
             const polOk = topPol >= bottomPol;
-            // POD vira regra flexível: se o de cima sai depois do de baixo, isso exige remoção.
             const podOk = topPod <= bottomPod;
-            return { ok: polOk, removalCost: podOk ? 0 : 1, polOk, podOk };
+            return {
+                ok: polOk && podOk,
+                removalCost: 0,
+                polOk,
+                podOk,
+                reason: !polOk ? 'POL incompatível com a pilha' : (!podOk ? 'POD incompatível com a pilha' : '')
+            };
         }
 
         function isStackPairCompatible(topInv, bottomInv) {
             const rel = getAutoStackRelation(topInv, bottomInv);
-            return rel.ok && rel.removalCost === 0;
+            return rel.ok;
         }
 
-        function getAutoRemovalBudgetFromInput() {
-            const input = document.getElementById('autoRemovalBudget');
-            let val = input ? parseInt(input.value, 10) : 12;
-            if (!Number.isFinite(val) || val < 0) val = 0;
-            if (val > 50) val = 50;
-            if (input) input.value = val;
-            return val;
-        }
-
-        function getAutoRemovalBudgetForAttempt(attemptIndex) {
-            const max = autoRuntime.maxRemovalBudget || 0;
-            if (max <= 0) return 0;
-            // Mantém diversidade: algumas tentativas seguem rígidas, outras usam parte ou todo o orçamento.
-            const mode = attemptIndex % 8;
-            if (mode === 0) return 0;
-            if (mode === 1 || mode === 4) return Math.ceil(max / 3);
-            if (mode === 2 || mode === 5) return Math.ceil((max * 2) / 3);
-            return max;
-        }
-
+        function getAutoRemovalBudgetFromInput() { return 0; }
+        function getAutoRemovalBudgetForAttempt(attemptIndex) { return 0; }
         function resetAutoAttemptRemovalCounters(attemptIndex) {
-            autoRuntime.currentRemovalBudget = getAutoRemovalBudgetForAttempt(attemptIndex);
+            autoRuntime.currentRemovalBudget = 0;
             autoRuntime.currentRemovalUsed = 0;
         }
 
@@ -1771,8 +1769,6 @@
             const bay = normalizeBayBase(bayId);
             const coord = `${row}-${col}`;
             const footprintBays = getPhysicalFootprintBays(bay, inv);
-            const removalBudget = Number.isFinite(options.removalBudget) ? options.removalBudget : (autoRuntime.currentRemovalBudget || 0);
-            const removalUsed = Number.isFinite(options.removalUsed) ? options.removalUsed : (autoRuntime.currentRemovalUsed || 0);
             let placementRemovalCost = 0;
             const seenStackPairs = new Set();
 
@@ -1782,13 +1778,7 @@
                 if (seenStackPairs.has(pairKey)) return { ok: true, reason: '' };
                 seenStackPairs.add(pairKey);
                 const rel = getAutoStackRelation(topInv, bottomInv);
-                if (!rel.ok) return { ok: false, reason: 'POL incompatível com a pilha' };
-                if (rel.removalCost > 0) {
-                    if (removalUsed + placementRemovalCost + rel.removalCost > removalBudget) {
-                        return { ok: false, reason: 'limite de remoções por POD atingido' };
-                    }
-                    placementRemovalCost += rel.removalCost;
-                }
+                if (!rel.ok) return { ok: false, reason: rel.reason || 'pilha incompatível' };
                 return { ok: true, reason: '' };
             };
 
@@ -1811,10 +1801,8 @@
             const below = getRowBelow(bay, row);
             const above = getRowAbove(bay, row);
 
-            if (below) {
-                for (let b of footprintBays) {
-                    if (!isPhysicalPositionOccupied(b, below, col)) return { ok: false, reason: 'contêiner voando' };
-                }
+            if (!hasRequiredAutoSupport(bay, row, col, inv)) {
+                return { ok: false, reason: 'contêiner voando' };
             }
 
             if (hasMod(inv, 'oh') || inv.base === 'oh40' || inv.base === 'oh45') {
@@ -1857,7 +1845,7 @@
             let score = 0;
 
             if (isImoInventory(inv)) score += 0;
-            else if (isReeferInventory(inv)) score += deck ? 0 : 8000;
+            else if (isReeferInventory(inv)) score += deck ? 9500 : -3500;
             else if (isTankInventory(inv)) score += deck ? 6000 : 0;
             else if (isEmptyInventory(inv)) score += deck ? -1200 : 2500;
             else score += deck ? 3000 : 0;
@@ -1890,7 +1878,7 @@
                     if (!grid) return;
                     let rows;
                     if (rowMode === 'deck') rows = [...grid.rowsAbove];
-                    else if (rowMode === 'reefer') rows = [...grid.rowsAbove, ...grid.rowsBelow];
+                    else if (rowMode === 'reefer') rows = [...grid.rowsBelow, ...grid.rowsAbove];
                     else rows = [...grid.rowsBelow, ...grid.rowsAbove];
                     rows.forEach(row => grid.cols.forEach(col => cache[key].push({ bayId, row, col })));
                 });
@@ -1957,12 +1945,6 @@
                 const validation = validateAutoPlacement(inv, pos.bayId, pos.row, pos.col);
                 if (!validation.ok) continue;
                 let score = scoreAutoCandidate(inv, pos.bayId, pos.row, pos.col);
-                if (validation.removalCost > 0) {
-                    // Usar remoção é permitido, mas custa pontuação. Para reefers, a penalidade é menor
-                    // porque o gargalo principal observado vem deles.
-                    score += validation.removalCost * (isReeferInventory(inv) ? 700 : 2400);
-                    if (options.preferRemovalsForReefer && isReeferInventory(inv)) score -= validation.removalCost * 1100;
-                }
                 if (typeof options.scoreAdjust === 'function') {
                     score += options.scoreAdjust(inv, pos, score) || 0;
                 }
@@ -1982,7 +1964,6 @@
                 if (sibling) getTwinBays(sibling).forEach(t => { savedShip[t][coord] = { base: 'blocked40' }; });
             }
             inv.placed++;
-            if (removalCost > 0) autoRuntime.currentRemovalUsed = (autoRuntime.currentRemovalUsed || 0) + removalCost;
         }
 
         function getAutoGroupSortScore(inv) {
@@ -2061,7 +2042,7 @@
             bestSnapshot: null,
             startedAt: 0,
             modeStats: null,
-            maxRemovalBudget: 12,
+            maxRemovalBudget: 0,
             currentRemovalBudget: 0,
             currentRemovalUsed: 0
         };
@@ -2487,7 +2468,6 @@
                 if (modeText) lines.push(`Modos testados: ${modeText}.`);
             }
             if (bestResult) {
-                lines.push(`Remoções estimadas usadas no melhor plano: ${bestResult.removalsUsed || 0}/${bestResult.removalBudget || autoRuntime.maxRemovalBudget || 0}.`);
             }
             lines.push('');
             lines.push('CAPACIDADE / DEMANDA TEÓRICA:');
@@ -2497,6 +2477,7 @@
                 lines.push(`Área reefer no melhor plano: ${reeferUsage.reeferPlacedInReeferBays} reefer(s) alocado(s) em bays reefer; ${reeferUsage.nonReeferInReeferBays} não-reefer(s) usando bays reefer; ${reeferUsage.nonReefer40On33Blocking35} 40'/45'/OL não-reefer na bay 33 bloqueando posição estrutural da bay 35.`);
                 const holdUse = analyzeAutoHoldUsage(bestResult && bestResult.savedShip ? bestResult.savedShip : null);
                 lines.push(`Uso do porão no melhor plano: ${holdUse.totalHold} contêiner(es) no porão; ${holdUse.reeferHold} reefer(s) no porão; ${holdUse.latePodHold} com destino tardio no porão.`);
+                lines.push('Nesta versão, reefers tentam o porão antes do convés e a regra de remoções foi removida.');
             } catch(e) {
                 lines.push('Não foi possível calcular a capacidade teórica nesta execução.');
             }
@@ -2523,9 +2504,8 @@
             const reasonText = Object.keys(byReason).join(' | ').toLowerCase();
             if ((byCategory['Reefer'] || 0) > 0) hints.push('gargalo provável nas bays reefer 35/37/39; se não houver bloqueio por não-reefer, o problema tende a ser uso insuficiente do porão ou pilhas reefer incompatíveis por POL/POD.');
             if ((byCategory['IMO'] || 0) > 0) hints.push('gargalo provável no convés das bays IMO 01/11.');
-            if (reasonText.includes('limite de remoções')) hints.push('a busca chegou ao limite de remoções permitido; aumentar esse limite pode liberar pilhas reefers, mas precisa caber no enunciado.');
             if (reasonText.includes('pol')) hints.push('muitos bloqueios por ordem de carregamento POL, que continua sendo regra rígida.');
-            if (reasonText.includes('pod') || reasonText.includes('remoç')) hints.push('muitos bloqueios por descarga POD; agora isso pode ser aceito até o limite de remoções definido.');
+            if (reasonText.includes('pod')) hints.push('muitos bloqueios por descarga POD; nesta versão a ordem de descarga voltou a ser rígida, sem remoções.');
             if (reasonText.includes('contêiner voando')) hints.push('a busca tentou posições altas sem apoio; pode estar faltando preencher bases compatíveis antes.');
             if (reasonText.includes("20' sobre 40") || reasonText.includes("40'/45")) hints.push("há conflito forte entre empilhamento de 20' e bases de 40'/45'.");
             if (reasonText.includes('ow') || reasonText.includes('oh') || reasonText.includes('ol')) hints.push('as cargas fora de medida estão bloqueando posições vizinhas/acima ou exigindo espaços livres difíceis.');
@@ -2658,25 +2638,13 @@
         }
 
         function placeRemainingReefersFirst(attemptIndex, rng, options = {}) {
-            let placed = 0;
-            let placementScore = 0;
-            const reefers = buildAutoReeferUnitOrder(attemptIndex, rng);
-            for (let inv of reefers) {
-                const chosen = tryPlaceAutoUnit(inv, attemptIndex, rng, { protectCritical: false, preferRemovalsForReefer: true });
-                if (!chosen) continue;
-                placementScore += chosen.score - 2500;
-                placed++;
-            }
-            return { placed, score: placementScore };
+            return placeReefersHoldFirstSelective(attemptIndex, rng, options);
         }
 
         function getAutoReeferPreferredSection(inv, attemptIndex) {
-            const podIdx = getOrderIndex(POD_ORDER, inv && inv.pod);
-            // Destinos mais tardios são melhores para formar base/porão.
-            // BA alterna entre porão e convés porque pode servir como transição da pilha.
-            if (podIdx >= 3) return 'hold'; // NA, VE, TR
-            if (podIdx === 2 && attemptIndex % 3 === 0) return 'hold'; // BA em parte das tentativas
-            return 'deck'; // LB, LH e parte de BA ficam mais acessíveis
+            // Nesta versão, para reefers somente, a busca começa pelo porão.
+            // O convés vira fallback/arremate depois que a base reefer foi tentada.
+            return 'hold';
         }
 
         function getAutoReeferHoldFirstBias(inv, pos, score) {
@@ -2686,12 +2654,13 @@
             let bias = 0;
             if (isHoldRow(pos.bayId, pos.row)) {
                 // No porão, favorecer base: POL antigo e POD tardio, de baixo para cima.
-                bias -= 6500;
-                bias += level * 220;
-                bias += polIdx * 120;
-                bias -= podIdx * 360;
+                bias -= 11500;
+                bias += level * 260;
+                bias += polIdx * 140;
+                bias -= podIdx * 420;
             } else {
-                // No convés, favorecer destinos cedo e níveis altos como acesso de descarga.
+                // Convés fica como fallback depois de tentar formar o porão reefer.
+                bias += 9500;
                 bias += Math.max(0, podIdx - 2) * 380;
                 bias -= Math.max(0, 3 - podIdx) * 260;
                 bias -= level * 80;
@@ -2716,43 +2685,45 @@
             let placed = 0;
             let placementScore = 0;
             const units = buildAutoReeferUnitOrder(attemptIndex, rng);
-            const holdPreferred = [];
-            const deckPreferred = [];
+            const stillDeferred = [];
+
+            // Fase 1 — para reefers somente: tenta o porão primeiro, de baixo para cima.
             units.forEach(inv => {
-                if (getAutoReeferPreferredSection(inv, attemptIndex) === 'hold') holdPreferred.push(inv);
-                else deckPreferred.push(inv);
-            });
-
-            const deferred = [];
-            const placeList = (list, section, bonus) => {
-                list.forEach(inv => {
-                    const chosen = tryPlaceAutoUnitInSection(inv, section, attemptIndex, rng, {
-                        protectCritical: false,
-                        scoreAdjust: getAutoReeferHoldFirstBias,
-                        preferRemovalsForReefer: true
-                    });
-                    if (chosen) {
-                        placementScore += chosen.score + bonus;
-                        placed++;
-                    } else {
-                        deferred.push(inv);
-                    }
-                });
-            };
-
-            // Primeiro cria base no porão com destinos tardios. Depois reserva o convés para destinos cedo.
-            placeList(holdPreferred, 'hold', -4200);
-            placeList(deckPreferred, 'deck', -3200);
-
-            // Arremate: se a seção ideal falhou, tenta qualquer posição reefer válida.
-            deferred.forEach(inv => {
-                const chosen = tryPlaceAutoUnit(inv, attemptIndex, rng, {
+                const chosen = tryPlaceAutoUnitInSection(inv, 'hold', attemptIndex, rng, {
                     protectCritical: false,
-                    scoreAdjust: getAutoReeferHoldFirstBias,
-                        preferRemovalsForReefer: true
+                    scoreAdjust: getAutoReeferHoldFirstBias
                 });
                 if (chosen) {
-                    placementScore += chosen.score - 1800;
+                    placementScore += chosen.score - 6500;
+                    placed++;
+                } else {
+                    stillDeferred.push(inv);
+                }
+            });
+
+            // Fase 2 — só o que não coube no porão tenta convés.
+            const finalDeferred = [];
+            stillDeferred.forEach(inv => {
+                const chosen = tryPlaceAutoUnitInSection(inv, 'deck', attemptIndex, rng, {
+                    protectCritical: false,
+                    scoreAdjust: getAutoReeferHoldFirstBias
+                });
+                if (chosen) {
+                    placementScore += chosen.score - 3200;
+                    placed++;
+                } else {
+                    finalDeferred.push(inv);
+                }
+            });
+
+            // Fase 3 — arremate final em qualquer posição reefer válida, mantendo POD/POL rígidos.
+            finalDeferred.forEach(inv => {
+                const chosen = tryPlaceAutoUnit(inv, attemptIndex, rng, {
+                    protectCritical: false,
+                    scoreAdjust: getAutoReeferHoldFirstBias
+                });
+                if (chosen) {
+                    placementScore += chosen.score - 1200;
                     placed++;
                 }
             });
@@ -2847,35 +2818,7 @@
         }
 
         function estimateAutoRemovalsInCurrentPlan(snapshot = null) {
-            const source = snapshot || savedShip;
-            const counted = new Set();
-            let removals = 0;
-            BASE_BAY_PAIRS.flat().forEach(bayId => {
-                const base = normalizeBayBase(bayId);
-                const grid = bayGrids[base];
-                if (!grid) return;
-                const sections = [grid.rowsBelow || [], grid.rowsAbove || []];
-                sections.forEach(rows => {
-                    for (let idx = rows.length - 1; idx > 0; idx--) {
-                        const bottomRow = rows[idx];
-                        const topRow = rows[idx - 1];
-                        grid.cols.forEach(col => {
-                            const topCell = source[base] && source[base][`${topRow}-${col}`];
-                            const bottomCell = source[base] && source[base][`${bottomRow}-${col}`];
-                            if (!topCell || !bottomCell || topCell.invId === undefined || bottomCell.invId === undefined) return;
-                            const topInv = getInventoryByIdFast(topCell.invId);
-                            const bottomInv = getInventoryByIdFast(bottomCell.invId);
-                            if (!topInv || !bottomInv) return;
-                            const key = `${topInv.id}>${bottomInv.id}@${topRow}/${bottomRow}/${col}`;
-                            if (counted.has(key)) return;
-                            counted.add(key);
-                            const rel = getAutoStackRelation(topInv, bottomInv);
-                            if (rel.ok && rel.removalCost > 0) removals += rel.removalCost;
-                        });
-                    }
-                });
-            });
-            return removals;
+            return 0;
         }
 
         function buildAutoRemainingUnits(attemptIndex, rng, priorityIds = null) {
@@ -2904,8 +2847,8 @@
                 placed: getCurrentPlacedCount(),
                 specialPlaced: getPlacedSpecialCount(),
                 placementScore,
-                removalsUsed: estimateAutoRemovalsInCurrentPlan(),
-                removalBudget: autoRuntime.currentRemovalBudget || 0,
+                removalsUsed: 0,
+                removalBudget: 0,
                 savedShip: null,
                 failures
             };
@@ -2992,7 +2935,7 @@
             const gapFinal = tryFillAutoSingleBayTwentySlots(attemptIndex, rng, { protectCritical: false });
             placementScore += gapFinal.score;
 
-            return finishAutoAttemptResult(attemptIndex, placementScore, 'porão-first seletivo + reefers em base');
+            return finishAutoAttemptResult(attemptIndex, placementScore, 'reefer porão-first rígido + base de porão');
         }
 
         function runReeferFirstAutoAttempt(attemptIndex) {
@@ -3037,7 +2980,7 @@
             const gapFinal = tryFillAutoSingleBayTwentySlots(attemptIndex, rng, { protectCritical: false });
             placementScore += gapFinal.score;
 
-            return finishAutoAttemptResult(attemptIndex, placementScore, 'reefer-first absoluto + proteção bay 33');
+            return finishAutoAttemptResult(attemptIndex, placementScore, 'reefer porão-first absoluto + proteção bay 33');
         }
 
         function getAutoStackUnitBias(inv, bayId, row, col, attemptIndex, rng) {
@@ -3114,7 +3057,6 @@
                         const validation = validateAutoPlacement(inv, lane.bayId, row, lane.col);
                         if (!validation.ok) continue;
                         let sc = getAutoStackUnitBias(inv, lane.bayId, row, lane.col, attemptIndex, rng);
-                        if (validation.removalCost > 0) sc += validation.removalCost * (isReeferInventory(inv) ? 650 : 2300);
                         if (sc < bestScore) { bestScore = sc; bestIdx = i; bestRemovalCost = validation.removalCost || 0; }
                     }
                     if (bestIdx !== -1) {
@@ -3414,7 +3356,7 @@
             const attempts = getAutoAttemptsFromInput();
             const maxMs = getAutoMaxMsFromInput();
             const uiInterval = getAutoUiIntervalFromInput();
-            const removalBudget = getAutoRemovalBudgetFromInput();
+            const removalBudget = 0;
             const backgroundMode = isAutoBackgroundEnabled();
             const bgText = backgroundMode ? `
 Segundo plano: ligado. Ela continua se você trocar de aba/tela, desde que o navegador não seja fechado.` : `
@@ -3423,8 +3365,7 @@ Segundo plano: desligado.`;
 
 Tentativas: ${attempts}${maxMs > 0 ? `
 Tempo máximo: ${Math.round(maxMs / 1000)} s` : `
-Tempo máximo: sem limite`}
-Máximo de remoções estimadas: ${removalBudget}${bgText}
+Tempo máximo: sem limite`}${bgText}
 
 Continuar?`)) return;
 
@@ -3449,7 +3390,7 @@ Continuar?`)) return;
             autoRuntime.currentRemovalUsed = 0;
             const capacityInfo = buildAutoCapacityDiagnostics();
 
-            setAutoProgress(0, attempts, 0, totalCargo, 'Iniciando busca híbrida com remoções controladas: porão-first, reefers em porão/convés, proteção bay 33, pilhas e reparo elite...');
+            setAutoProgress(0, attempts, 0, totalCargo, 'Iniciando busca híbrida sem remoções: reefers começam pelo porão, com auditoria de apoio, proteção bay 33, pilhas e reparo elite...');
             setAutoReport([`Testando ${attempts} possibilidade(s).`, 'O melhor plano encontrado será aplicado ao final.', ...capacityInfo.lines], true);
             setAutoBackgroundStatus(backgroundMode ? 'Segundo plano ligado. Pode trocar de aba/tela sem perder a busca.' : 'Segundo plano desligado.', backgroundMode ? 'running' : '');
             await autoYield();
@@ -3480,8 +3421,8 @@ Continuar?`)) return;
                         const detail = best && best.placed === totalCargo
                             ? 'Plano completo encontrado. Finalizando...'
                             : improvedBest
-                                ? `Nova melhor tentativa (${result.mode || 'modo híbrido'}): ${best ? best.placed : 0}/${totalCargo}; remoções ${best ? (best.removalsUsed || 0) : 0}/${best ? (best.removalBudget || removalBudget) : removalBudget}.` + (hiddenBackground ? ' Rodando em segundo plano.' : ' A tela foi atualizada com ela.')
-                                : `Última tentativa descartada (${result.mode || 'modo híbrido'}): ${result.placed}/${totalCargo}; remoções ${result.removalsUsed || 0}/${result.removalBudget || removalBudget}. Melhor mantido: ${best ? best.placed : 0}/${totalCargo}.`;
+                                ? `Nova melhor tentativa (${result.mode || 'modo híbrido'}): ${best ? best.placed : 0}/${totalCargo}.` + (hiddenBackground ? ' Rodando em segundo plano.' : ' A tela foi atualizada com ela.')
+                                : `Última tentativa descartada (${result.mode || 'modo híbrido'}): ${result.placed}/${totalCargo}. Melhor mantido: ${best ? best.placed : 0}/${totalCargo}.`;
                         setAutoProgress(attempt + 1, attempts, best ? best.placed : 0, totalCargo, detail);
 
                         if (hiddenBackground) {
@@ -3491,8 +3432,6 @@ Continuar?`)) return;
                                 `Tentativa atual: ${attempt + 1}/${attempts}`,
                                 `Melhor resultado mantido na tela: ${best ? best.placed : 0}/${totalCargo}`,
                                 `Modo da última tentativa: ${result.mode || 'modo híbrido'}`,
-                                `Remoções da última tentativa: ${result.removalsUsed || 0}/${result.removalBudget || removalBudget}`,
-                                best ? `Remoções do melhor plano: ${best.removalsUsed || 0}/${best.removalBudget || removalBudget}` : 'Sem melhor plano ainda.',
                                 improvedBest ? 'Última tentativa virou a nova melhor.' : `Última tentativa foi descartada: ${result.placed}/${totalCargo}`,
                                 previousBestPlaced > 0 ? `Melhor anterior: ${previousBestPlaced}/${totalCargo}` : 'Trava ativa: tentativas piores não substituem o melhor plano.'
                             ], true);
