@@ -2042,7 +2042,7 @@
             bestSnapshot: null,
             startedAt: 0,
             modeStats: null,
-            maxRemovalBudget: 0,
+            maxRemovalBudget: 12,
             currentRemovalBudget: 0,
             currentRemovalUsed: 0
         };
@@ -2477,7 +2477,9 @@
                 lines.push(`Área reefer no melhor plano: ${reeferUsage.reeferPlacedInReeferBays} reefer(s) alocado(s) em bays reefer; ${reeferUsage.nonReeferInReeferBays} não-reefer(s) usando bays reefer; ${reeferUsage.nonReefer40On33Blocking35} 40'/45'/OL não-reefer na bay 33 bloqueando posição estrutural da bay 35.`);
                 const holdUse = analyzeAutoHoldUsage(bestResult && bestResult.savedShip ? bestResult.savedShip : null);
                 lines.push(`Uso do porão no melhor plano: ${holdUse.totalHold} contêiner(es) no porão; ${holdUse.reeferHold} reefer(s) no porão; ${holdUse.latePodHold} com destino tardio no porão.`);
-                lines.push('Nesta versão, reefers tentam o porão antes do convés e a regra de remoções foi removida.');
+                const reefAudit = analyzeAutoEmptyReeferFootprints(bestResult && bestResult.savedShip ? bestResult.savedShip : null);
+                lines.push(`Auditoria reefer 40': espaços vazios estruturais — porão ${reefAudit.emptyHold40} (${reefAudit.supportedHold40} já com apoio), convés ${reefAudit.emptyDeck40} (${reefAudit.supportedDeck40} já com apoio).`);
+                lines.push('Nesta versão, os reefers são resolvidos primeiro como subproblema próprio: porão por coluna, depois convés, sem remoções.');
             } catch(e) {
                 lines.push('Não foi possível calcular a capacidade teórica nesta execução.');
             }
@@ -2614,6 +2616,224 @@
             return chosen;
         }
 
+        function getAutoReeferRepresentativeInventory() {
+            return globalInventory.find(inv => isReeferInventory(inv)) || null;
+        }
+
+        function getReeferSectionRowsBottomUp(bayId, section) {
+            const grid = bayGrids[bayId];
+            if (!grid) return [];
+            const rows = section === 'hold' ? grid.rowsBelow : grid.rowsAbove;
+            // rowsBelow/rowsAbove vêm de cima para baixo no desenho; para estivar sem "voar",
+            // o solver de reefers trabalha sempre do fundo/base para cima.
+            return [...rows].reverse();
+        }
+
+        function isAutoFootprintStructurallyValidForInv(inv, bayId, row, col) {
+            return getPhysicalFootprintBays(bayId, inv).every(b => isStructurallyValidAutoSlot(b, row, col));
+        }
+
+        function buildAutoReeferColumnLanes(section, attemptIndex, rng) {
+            const sample = getAutoReeferRepresentativeInventory();
+            if (!sample) return [];
+            const lanes = [];
+            REEFER_BAYS.forEach(bayId => {
+                ensureBayStorage(bayId);
+                const grid = bayGrids[bayId];
+                if (!grid) return;
+                grid.cols.forEach(col => {
+                    const rows = getReeferSectionRowsBottomUp(bayId, section)
+                        .filter(row => isAutoFootprintStructurallyValidForInv(sample, bayId, row, col));
+                    if (!rows.length) return;
+                    const center = getColumnCenterDistance(bayId, col);
+                    const bayBias = parseInt(bayId, 10) || 0;
+                    let laneScore = 0;
+                    // No porão, prioriza colunas com mais altura útil. No convés, isso também ajuda
+                    // a evitar muitos buracos entre as pilhas.
+                    laneScore -= rows.length * 1000;
+                    laneScore += center * 15;
+                    laneScore += bayBias * 0.1;
+                    laneScore += (rng() - 0.5) * (attemptIndex % 2 ? 120 : 20);
+                    lanes.push({ bayId, col, rows, section, laneScore });
+                });
+            });
+            lanes.sort((a, b) => a.laneScore - b.laneScore);
+            return lanes;
+        }
+
+        function getAutoReeferExactSlotScore(inv, bayId, row, col, section, attemptIndex, rng) {
+            const rows = getRowsOfSameSection(bayId, row);
+            const level = getVerticalLevelFromBottom(bayId, row);
+            const maxLevel = Math.max(1, rows.length - 1);
+            const h = Math.min(1, Math.max(0, level / maxLevel));
+            const podIdx = getOrderIndex(POD_ORDER, inv && inv.pod);
+            const polIdx = getOrderIndex(POL_ORDER, inv && inv.pol);
+            const center = getColumnCenterDistance(bayId, col);
+            let score = 0;
+
+            // Baixo da pilha: destinos tardios e POL antigo.
+            // Alto da pilha: destinos mais cedo e POL mais recente.
+            score += (1 - h) * (POD_ORDER.length - 1 - Math.min(podIdx, POD_ORDER.length - 1)) * 1350;
+            score += h * Math.min(podIdx, POD_ORDER.length - 1) * 1250;
+            score += (1 - h) * polIdx * 360;
+            score -= h * polIdx * 260;
+
+            if (section === 'hold') {
+                // Nesta versão, o porão é tratado como subproblema real dos reefers:
+                // preencher base primeiro é mais importante do que buscar o melhor slot visual.
+                score -= 9000;
+                score += level * 35;
+                if (inv.pod === 'TR' && level > 1) score += 1600;
+                if (inv.pod === 'VE' && level > 3) score += 900;
+                if ((inv.pod === 'LB' || inv.pod === 'LH') && level >= 2) score -= 950;
+                if (inv.pod === 'BA' && level >= 2) score -= 450;
+            } else {
+                score += 1500;
+                if (inv.pod === 'LB' || inv.pod === 'LH') score -= 1400;
+                if (inv.pod === 'BA') score -= 650;
+                if (inv.pod === 'TR' || inv.pod === 'VE') score += 750;
+            }
+
+            // Leve preferência para compactar por colunas centrais, mas sem impedir uso lateral.
+            score += center * 8;
+            score += (rng() - 0.5) * (attemptIndex % 3 === 0 ? 140 : 520);
+            return score;
+        }
+
+        function buildRemainingAutoReeferPool(attemptIndex, rng) {
+            const pool = [];
+            globalInventory.forEach(inv => {
+                if (!isReeferInventory(inv)) return;
+                const remaining = Math.max(0, (parseInt(inv.qty, 10) || 0) - (parseInt(inv.placed, 10) || 0));
+                for (let i = 0; i < remaining; i++) pool.push(inv);
+            });
+            // Ordenação inicial só desempata a busca; a escolha final é feita por slot exato.
+            pool.sort((a, b) => {
+                const ap = getOrderIndex(POD_ORDER, a.pod);
+                const bp = getOrderIndex(POD_ORDER, b.pod);
+                const al = getOrderIndex(POL_ORDER, a.pol);
+                const bl = getOrderIndex(POL_ORDER, b.pol);
+                const base = (bp - ap) || (al - bl);
+                return base || ((rng() - 0.5) * (attemptIndex % 2 ? 2 : 0));
+            });
+            return pool;
+        }
+
+        function findBestReeferForExactSlot(pool, bayId, row, col, section, attemptIndex, rng, audit = null) {
+            let bestIdx = -1;
+            let bestScore = Infinity;
+            for (let i = 0; i < pool.length; i++) {
+                const inv = pool[i];
+                const validation = validateAutoPlacement(inv, bayId, row, col);
+                if (!validation.ok) {
+                    if (audit && validation.reason) incrementAutoCount(audit.reasons, validation.reason);
+                    continue;
+                }
+                const score = getAutoReeferExactSlotScore(inv, bayId, row, col, section, attemptIndex, rng);
+                if (score < bestScore) {
+                    bestScore = score;
+                    bestIdx = i;
+                }
+            }
+            if (bestIdx === -1) return null;
+            return { index: bestIdx, inv: pool[bestIdx], score: bestScore };
+        }
+
+        function fillAutoReeferColumnsFromPool(pool, section, attemptIndex, rng, audit = null) {
+            let placed = 0;
+            let score = 0;
+            const lanes = buildAutoReeferColumnLanes(section, attemptIndex, rng);
+            if (audit) audit.lanesTried += lanes.length;
+
+            lanes.forEach(lane => {
+                for (let r = 0; r < lane.rows.length; r++) {
+                    if (!pool.length) return;
+                    const row = lane.rows[r];
+                    const picked = findBestReeferForExactSlot(pool, lane.bayId, row, lane.col, section, attemptIndex, rng, audit);
+                    if (!picked) {
+                        // Se a base da próxima camada não foi formada, continuar subindo só gera "voando".
+                        // Para rows ocultas/estruturalmente inválidas elas nem entram em lane.rows.
+                        break;
+                    }
+                    commitAutoPlacement(picked.inv, lane.bayId, row, lane.col, 0);
+                    pool.splice(picked.index, 1);
+                    placed++;
+                    score += picked.score;
+                    if (audit) {
+                        if (section === 'hold') audit.holdPlaced++;
+                        else audit.deckPlaced++;
+                    }
+                }
+            });
+            return { placed, score };
+        }
+
+        function finishAutoReeferPoolByCandidates(pool, attemptIndex, rng, audit = null) {
+            let placed = 0;
+            let score = 0;
+            for (let i = 0; i < pool.length; ) {
+                const inv = pool[i];
+                const chosen = tryPlaceAutoUnit(inv, attemptIndex, rng, {
+                    protectCritical: false,
+                    scoreAdjust: getAutoReeferHoldFirstBias
+                });
+                if (chosen) {
+                    placed++;
+                    score += chosen.score;
+                    pool.splice(i, 1);
+                    if (audit) {
+                        if (isHoldRow(chosen.bayId, chosen.row)) audit.holdPlaced++;
+                        else audit.deckPlaced++;
+                    }
+                } else {
+                    i++;
+                }
+            }
+            return { placed, score };
+        }
+
+        function analyzeAutoEmptyReeferFootprints(snapshot = null) {
+            const source = snapshot || savedShip;
+            const inv = getAutoReeferRepresentativeInventory();
+            const stats = { emptyHold40: 0, emptyDeck40: 0, supportedHold40: 0, supportedDeck40: 0 };
+            if (!inv) return stats;
+
+            const sourceOccupied = (bayId, row, col) => {
+                const coord = `${row}-${col}`;
+                for (let t of getTwinBays(bayId)) {
+                    if (source[t] && source[t][coord]) return true;
+                }
+                return false;
+            };
+
+            const sourceHasSupport = (bayId, row, col) => {
+                if (isBaseRowInSection(bayId, row)) return true;
+                const below = getRowBelow(bayId, row);
+                if (!below) return true;
+                return getPhysicalFootprintBays(bayId, inv).every(b => sourceOccupied(b, below, col));
+            };
+
+            REEFER_BAYS.forEach(bayId => {
+                const grid = bayGrids[bayId];
+                if (!grid) return;
+                [...grid.rowsBelow, ...grid.rowsAbove].forEach(row => {
+                    grid.cols.forEach(col => {
+                        const footprint = getPhysicalFootprintBays(bayId, inv);
+                        if (!footprint.every(b => isStructurallyValidAutoSlot(b, row, col))) return;
+                        if (footprint.some(b => sourceOccupied(b, row, col))) return;
+                        const hold = isHoldRow(bayId, row);
+                        if (hold) stats.emptyHold40++;
+                        else stats.emptyDeck40++;
+                        if (sourceHasSupport(bayId, row, col)) {
+                            if (hold) stats.supportedHold40++;
+                            else stats.supportedDeck40++;
+                        }
+                    });
+                });
+            });
+            return stats;
+        }
+
         function buildAutoReeferUnitOrder(attemptIndex, rng) {
             const units = [];
             globalInventory.forEach(inv => {
@@ -2682,52 +2902,32 @@
         }
 
         function placeReefersHoldFirstSelective(attemptIndex, rng, options = {}) {
-            let placed = 0;
             let placementScore = 0;
-            const units = buildAutoReeferUnitOrder(attemptIndex, rng);
-            const stillDeferred = [];
+            const audit = { lanesTried: 0, holdPlaced: 0, deckPlaced: 0, reasons: {} };
+            const pool = buildRemainingAutoReeferPool(attemptIndex, rng);
 
-            // Fase 1 — para reefers somente: tenta o porão primeiro, de baixo para cima.
-            units.forEach(inv => {
-                const chosen = tryPlaceAutoUnitInSection(inv, 'hold', attemptIndex, rng, {
-                    protectCritical: false,
-                    scoreAdjust: getAutoReeferHoldFirstBias
-                });
-                if (chosen) {
-                    placementScore += chosen.score - 6500;
-                    placed++;
-                } else {
-                    stillDeferred.push(inv);
-                }
-            });
+            // Fase 1 — REEFER ONLY / PORÃO FIRST REAL:
+            // monta colunas físicas de 40' no porão, de baixo para cima, antes de qualquer convés.
+            const hold = fillAutoReeferColumnsFromPool(pool, 'hold', attemptIndex, rng, audit);
+            placementScore += hold.score - hold.placed * 9000;
 
-            // Fase 2 — só o que não coube no porão tenta convés.
-            const finalDeferred = [];
-            stillDeferred.forEach(inv => {
-                const chosen = tryPlaceAutoUnitInSection(inv, 'deck', attemptIndex, rng, {
-                    protectCritical: false,
-                    scoreAdjust: getAutoReeferHoldFirstBias
-                });
-                if (chosen) {
-                    placementScore += chosen.score - 3200;
-                    placed++;
-                } else {
-                    finalDeferred.push(inv);
-                }
-            });
+            // Fase 2 — só depois usa o convés, também por coluna/base para evitar buracos.
+            const deck = fillAutoReeferColumnsFromPool(pool, 'deck', attemptIndex, rng, audit);
+            placementScore += deck.score - deck.placed * 2600;
 
-            // Fase 3 — arremate final em qualquer posição reefer válida, mantendo POD/POL rígidos.
-            finalDeferred.forEach(inv => {
-                const chosen = tryPlaceAutoUnit(inv, attemptIndex, rng, {
-                    protectCritical: false,
-                    scoreAdjust: getAutoReeferHoldFirstBias
-                });
-                if (chosen) {
-                    placementScore += chosen.score - 1200;
-                    placed++;
-                }
-            });
-            return { placed, score: placementScore };
+            // Fase 3 — arremate por candidatos tradicionais para aproveitar eventuais gaps que sobraram.
+            const rest = finishAutoReeferPoolByCandidates(pool, attemptIndex, rng, audit);
+            placementScore += rest.score - rest.placed * 900;
+
+            autoRuntime.lastReeferColumnAudit = {
+                holdPlaced: audit.holdPlaced,
+                deckPlaced: audit.deckPlaced,
+                lanesTried: audit.lanesTried,
+                reasons: clonePlainObject(audit.reasons || {}),
+                remaining: pool.length
+            };
+
+            return { placed: hold.placed + deck.placed + rest.placed, score: placementScore, audit: autoRuntime.lastReeferColumnAudit };
         }
 
         function isAutoHoldFirstEligible(inv, attemptIndex) {
@@ -3390,7 +3590,7 @@ Continuar?`)) return;
             autoRuntime.currentRemovalUsed = 0;
             const capacityInfo = buildAutoCapacityDiagnostics();
 
-            setAutoProgress(0, attempts, 0, totalCargo, 'Iniciando busca híbrida sem remoções: reefers começam pelo porão, com auditoria de apoio, proteção bay 33, pilhas e reparo elite...');
+            setAutoProgress(0, attempts, 0, totalCargo, 'Iniciando busca híbrida sem remoções: reefers primeiro por colunas no porão, depois convés, com auditoria de apoio, proteção bay 33, pilhas e reparo elite...');
             setAutoReport([`Testando ${attempts} possibilidade(s).`, 'O melhor plano encontrado será aplicado ao final.', ...capacityInfo.lines], true);
             setAutoBackgroundStatus(backgroundMode ? 'Segundo plano ligado. Pode trocar de aba/tela sem perder a busca.' : 'Segundo plano desligado.', backgroundMode ? 'running' : '');
             await autoYield();
