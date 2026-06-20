@@ -560,7 +560,7 @@
                                 <input type="number" id="autoUiInterval" min="1" max="500" step="5" value="25">
                             </label>
                         </div>
-                        <div class="auto-stow-hint">0 s = sem limite de tempo. Combina contêiner por contêiner, pilha por pilha, reserva rígida e reparo elite. A tela só atualiza de tempos em tempos para ganhar velocidade.</div>
+                        <div class="auto-stow-hint">0 s = sem limite de tempo. Combina reefer-first, proteção bay 33, pilha por pilha, contêiner por contêiner e reparo elite. A tela só atualiza de tempos em tempos para ganhar velocidade.</div>
                         <div class="auto-bg-row">
                             <label><input type="checkbox" id="autoBackgroundMode" checked> Continuar rodando ao sair da aba/tela</label>
                             <div id="autoBackgroundStatus" class="auto-bg-status">Enquanto a aba continuar aberta, a busca segue em segundo plano. Se fechar o navegador, ela para.</div>
@@ -1391,6 +1391,44 @@
             return !!getCellDataAcrossTwins(bayId, coord);
         }
 
+        function getOwAutoSideInfo(bayId, row, col) {
+            const leftCol = getAdjacentCol(bayId, col, 'left');
+            const rightCol = getAdjacentCol(bayId, col, 'right');
+            const leftCoord = leftCol ? `${row}-${leftCol}` : null;
+            const rightCoord = rightCol ? `${row}-${rightCol}` : null;
+
+            const leftHull = !leftCol || !shipTopology[bayId] || shipTopology[bayId][leftCoord];
+            const rightHull = !rightCol || !shipTopology[bayId] || shipTopology[bayId][rightCoord];
+            const leftOccupied = !leftHull && !!getCellDataAcrossTwins(bayId, leftCoord);
+            const rightOccupied = !rightHull && !!getCellDataAcrossTwins(bayId, rightCoord);
+            const leftBlocked = leftHull || leftOccupied;
+            const rightBlocked = rightHull || rightOccupied;
+
+            return {
+                leftBlocked,
+                rightBlocked,
+                leftHull,
+                rightHull,
+                leftOccupied,
+                rightOccupied,
+                blockedCount: (leftBlocked ? 1 : 0) + (rightBlocked ? 1 : 0),
+                hullCount: (leftHull ? 1 : 0) + (rightHull ? 1 : 0),
+                openCount: (!leftBlocked ? 1 : 0) + (!rightBlocked ? 1 : 0)
+            };
+        }
+
+        function getOwAutoPlacementBonus(bayId, row, col) {
+            const info = getOwAutoSideInfo(bayId, row, col);
+            let bonus = 0;
+            // Melhor caso: o OW encosta no casco/parede de um lado e joga o excesso para o lado livre.
+            // Isso evita desperdiçar os dois lados e corrige casos como OW no meio da bay 01.
+            if (info.blockedCount === 1) bonus -= 7000;
+            if (info.hullCount === 1 && info.blockedCount === 1) bonus -= 3500;
+            if (info.blockedCount === 0) bonus += 2600; // ambos livres: válido, mas menos eficiente.
+            if (info.blockedCount >= 2) bonus += 999999; // a validação já barra, mas mantém pontuação defensiva.
+            return bonus;
+        }
+
         function getOwVisualClass(bayId, row, col) {
             const leftBlocked = isSideBlockedForOw(bayId, row, col, 'left');
             const rightBlocked = isSideBlockedForOw(bayId, row, col, 'right');
@@ -1808,7 +1846,7 @@
             else score += center * 6;
 
             if (hasMod(inv, 'oh')) score -= level * 15;
-            if (hasMod(inv, 'ow')) score += center * 10;
+            if (hasMod(inv, 'ow')) { score += getOwAutoPlacementBonus(bayId, row, col); score -= center * 520; }
             if (inv.size === '40' || inv.size === '45') score -= 80;
             if (inv.size === '20') {
                 score += 30;
@@ -1852,10 +1890,33 @@
             return autoRuntime.positionCache.normal;
         }
 
+        function hasRemainingAutoReeferCargo() {
+            return globalInventory.some(inv => isReeferInventory(inv) && ((parseInt(inv.qty, 10) || 0) > (parseInt(inv.placed, 10) || 0)));
+        }
+
+        function isReeferPairBlockerCandidate(inv, bayId, row, col) {
+            if (!inv || isReeferInventory(inv)) return false;
+            const bay = normalizeBayBase(bayId);
+            // A bay 35 é reefer, mas é fisicamente pareada com a 33. Um 40'/45'/OL na 33
+            // consome a posição correspondente da 35; por isso fica protegido enquanto há reefer sobrando.
+            if (bay === '33' && (inv.size === '40' || inv.size === '45' || hasMod(inv, 'ol'))) {
+                return isStructurallyValidAutoSlot('35', row, col);
+            }
+            return false;
+        }
+
+        function isReeferAreaBlockerPlacement(placement) {
+            if (!placement || !placement.inv || isReeferInventory(placement.inv)) return false;
+            const bay = normalizeBayBase(placement.bayId);
+            if (REEFER_BAYS.includes(bay)) return true;
+            return isReeferPairBlockerCandidate(placement.inv, bay, placement.row, placement.col);
+        }
+
         function shouldProtectCriticalAutoPosition(inv, pos, options = {}) {
             if (!options || !options.protectCritical) return false;
             const bay = normalizeBayBase(pos.bayId);
             if (!isReeferInventory(inv) && REEFER_BAYS.includes(bay)) return true;
+            if (hasRemainingAutoReeferCargo() && isReeferPairBlockerCandidate(inv, bay, pos.row, pos.col)) return true;
             if (!isImoInventory(inv) && (bay === '01' || bay === '11') && isDeckRow(bay, pos.row)) return true;
             return false;
         }
@@ -1889,8 +1950,8 @@
 
         function getAutoGroupSortScore(inv) {
             let category = 5;
-            if (isImoInventory(inv)) category = 0;
-            else if (isReeferInventory(inv)) category = 1;
+            if (isReeferInventory(inv)) category = 0;
+            else if (isImoInventory(inv)) category = 1;
             else if (isTankInventory(inv)) category = 2;
             else if (hasMod(inv, 'ow') || hasMod(inv, 'oh') || hasMod(inv, 'ol')) category = 3;
             else if (isEmptyInventory(inv)) category = 6;
@@ -2057,8 +2118,10 @@
         }
 
         function getAutoCategory(inv) {
-            if (isImoInventory(inv)) return 0;
-            if (isReeferInventory(inv)) return 1;
+            // Reefer virou prioridade máxima porque o relatório mostrou que ele é o gargalo real.
+            // IMO continua logo depois, pois tem bay/convés restrito.
+            if (isReeferInventory(inv)) return 0;
+            if (isImoInventory(inv)) return 1;
             if (hasMod(inv, 'ow') || hasMod(inv, 'oh') || hasMod(inv, 'ol')) return 2;
             if (inv.size === '40' || inv.size === '45') return 3;
             if (isTankInventory(inv)) return 4;
@@ -2142,7 +2205,7 @@
                 if (strategy === 4 && isTankInventory(inv)) score += level * 120 + center * 25;
                 if (strategy === 5 && (inv.size === '40' || inv.size === '45')) score -= 600;
                 if (strategy === 6 && inv.size === '20') score -= 250;
-                if (strategy === 7 && hasMod(inv, 'ow')) score += center * 35;
+                if (strategy === 7 && hasMod(inv, 'ow')) score += getOwAutoPlacementBonus(c.bayId, c.row, c.col) - center * 420;
                 if (strategy === 8 && hasMod(inv, 'oh')) score -= level * 90;
                 if (strategy === 9) score += center * 12;
 
@@ -2294,6 +2357,38 @@
             };
         }
 
+        function analyzeAutoReeferCriticalUsage(snapshot = null) {
+            const source = snapshot || savedShip;
+            const seen = new Set();
+            const stats = {
+                reeferPlacedInReeferBays: 0,
+                nonReeferInReeferBays: 0,
+                nonReefer40On33Blocking35: 0
+            };
+            Object.keys(source || {}).forEach(bayId => {
+                const base = normalizeBayBase(bayId);
+                const data = source[bayId] || {};
+                Object.keys(data).forEach(coord => {
+                    const cell = data[coord];
+                    if (!cell || cell.invId === undefined) return;
+                    const key = `${cell.invId}-${base}-${coord}`;
+                    if (seen.has(key)) return;
+                    seen.add(key);
+                    const inv = getInventoryByIdFast(cell.invId);
+                    if (!inv) return;
+                    const [row, col] = coord.split('-');
+                    if (REEFER_BAYS.includes(base)) {
+                        if (isReeferInventory(inv)) stats.reeferPlacedInReeferBays++;
+                        else stats.nonReeferInReeferBays++;
+                    }
+                    if (base === '33' && !isReeferInventory(inv) && (inv.size === '40' || inv.size === '45' || hasMod(inv, 'ol')) && isStructurallyValidAutoSlot('35', row, col)) {
+                        stats.nonReefer40On33Blocking35++;
+                    }
+                });
+            });
+            return stats;
+        }
+
         function buildAutoDifficultyReport(bestResult, totalCargo, executedAttempts, requestedAttempts, stopReason = '') {
             const failures = (bestResult && bestResult.failures ? bestResult.failures : []).map(normalizeAutoFailureRecord);
             const placed = bestResult ? bestResult.placed : 0;
@@ -2329,6 +2424,8 @@
             lines.push('CAPACIDADE / DEMANDA TEÓRICA:');
             try {
                 buildAutoCapacityDiagnostics().lines.forEach(line => lines.push(line));
+                const reeferUsage = analyzeAutoReeferCriticalUsage(bestResult && bestResult.savedShip ? bestResult.savedShip : null);
+                lines.push(`Área reefer no melhor plano: ${reeferUsage.reeferPlacedInReeferBays} reefer(s) alocado(s) em bays reefer; ${reeferUsage.nonReeferInReeferBays} não-reefer(s) usando bays reefer; ${reeferUsage.nonReefer40On33Blocking35} 40'/45'/OL não-reefer na bay 33 bloqueando posição estrutural da bay 35.`);
             } catch(e) {
                 lines.push('Não foi possível calcular a capacidade teórica nesta execução.');
             }
@@ -2418,6 +2515,19 @@
             return seen.size;
         }
 
+        function countEffectiveReeferFortyFootprints(positionList) {
+            const seen = new Set();
+            const dummy = { size: '40', base: 'dry', mods: ['reefer'], pod: 'LH', pol: 'RG' };
+            (positionList || []).forEach(pos => {
+                const base = normalizeBayBase(pos.bayId);
+                const footprint = getPhysicalFootprintBays(base, dummy);
+                if (!footprint.every(b => isStructurallyValidAutoSlot(b, pos.row, pos.col))) return;
+                const key = footprint.slice().sort().join('+') + '-' + pos.row + '-' + pos.col;
+                seen.add(key);
+            });
+            return seen.size;
+        }
+
         function buildAutoCapacityDiagnostics() {
             const cache = buildAutoPositionCache();
             const demand = getAutoDemandSummary();
@@ -2426,6 +2536,7 @@
             const holdSlots = countAutoTheoreticalSlots(normalPositions.filter(p => isHoldRow(p.bayId, p.row)));
             const reeferDeck = countAutoTheoreticalSlots((cache.reefer || []).filter(p => isDeckRow(p.bayId, p.row)));
             const reeferHold = countAutoTheoreticalSlots((cache.reefer || []).filter(p => isHoldRow(p.bayId, p.row)));
+            const reefer40Effective = countEffectiveReeferFortyFootprints(cache.reefer || []);
             const imoNA = countAutoTheoreticalSlots(cache.imoNA || []);
             const imoLH = countAutoTheoreticalSlots(cache.imoLH || []);
             const singleBaySlots = countAutoSingleBayOnlySlots(normalPositions, false);
@@ -2438,6 +2549,7 @@
                 reeferSlots: reeferDeck + reeferHold,
                 reeferDeck,
                 reeferHold,
+                reefer40Effective,
                 imoNA,
                 imoLH,
                 singleBaySlots,
@@ -2445,7 +2557,7 @@
                 lines: [
                     `Capacidade teórica aproximada em slots de 20': total ${deckSlots + holdSlots} (${deckSlots} convés, ${holdSlots} porão).`,
                     `Slots bons para 20' por limitação de bay pareada: ${singleBaySlots} (${hullSingleBaySlots} por casco/ausência estrutural da bay vizinha).`,
-                    `Reefer: demanda ${demand.reefer}; slots reefer teóricos ${reeferDeck + reeferHold} (${reeferDeck} convés, ${reeferHold} porão).`,
+                    `Reefer: demanda ${demand.reefer}; slots reefer teóricos ${reeferDeck + reeferHold} (${reeferDeck} convés, ${reeferHold} porão); pegadas efetivas para 40' reefer: ${reefer40Effective}.`,
                     `IMO: demanda NA ${demand.imoNA}/slots convés bay 01 ${imoNA}; demanda LH ${demand.imoLH}/slots convés bay 11 ${imoLH}.`,
                     `Carga sensível: ${demand.fortyLike} contêiner(es) 40'/45', ${demand.twenty} contêiner(es) 20', ${demand.odd} fora de medida, ${demand.tank} tank, ${demand.empty} empty.`
                 ]
@@ -2462,6 +2574,42 @@
             if (!chosen) return null;
             commitAutoPlacement(inv, chosen.bayId, chosen.row, chosen.col);
             return chosen;
+        }
+
+        function buildAutoReeferUnitOrder(attemptIndex, rng) {
+            const units = [];
+            globalInventory.forEach(inv => {
+                if (!isReeferInventory(inv)) return;
+                const remaining = Math.max(0, (parseInt(inv.qty, 10) || 0) - (parseInt(inv.placed, 10) || 0));
+                for (let i = 0; i < remaining; i++) {
+                    const pol = getOrderIndex(POL_ORDER, inv.pol);
+                    const pod = getOrderIndex(POD_ORDER, inv.pod);
+                    let score = 0;
+                    // Base da pilha tende a receber destino mais tardio e POL mais antigo;
+                    // destinos mais cedo ficam disponíveis em cima conforme a pilha cresce.
+                    score += pol * 900;
+                    score += (POD_ORDER.length - 1 - Math.min(pod, POD_ORDER.length - 1)) * 1600;
+                    if (inv.size === '40' || inv.size === '45') score -= 250;
+                    if (isEmptyInventory(inv)) score += 700;
+                    if (attemptIndex > 0) score += (rng() - 0.5) * 900;
+                    units.push({ inv, priority: score });
+                }
+            });
+            units.sort((a, b) => a.priority - b.priority);
+            return units.map(u => u.inv);
+        }
+
+        function placeRemainingReefersFirst(attemptIndex, rng, options = {}) {
+            let placed = 0;
+            let placementScore = 0;
+            const reefers = buildAutoReeferUnitOrder(attemptIndex, rng);
+            for (let inv of reefers) {
+                const chosen = tryPlaceAutoUnit(inv, attemptIndex, rng, { protectCritical: false });
+                if (!chosen) continue;
+                placementScore += chosen.score - 2500;
+                placed++;
+            }
+            return { placed, score: placementScore };
         }
 
 
@@ -2534,22 +2682,29 @@
             const seed = ((Date.now() & 0xffffffff) ^ Math.imul(attemptIndex + 11, 2246822519)) >>> 0;
             const rng = createAutoRng(seed);
             const units = buildAutoUnitOrder(attemptIndex, rng);
-            const critical = units.filter(isCriticalAutoCargo);
+            const reefers = units.filter(isReeferInventory);
+            const critical = units.filter(inv => isCriticalAutoCargo(inv) && !isReeferInventory(inv));
             const rest = units.filter(inv => !isCriticalAutoCargo(inv));
             let placementScore = 0;
 
-            critical.forEach(inv => {
+            reefers.forEach(inv => {
                 const chosen = tryPlaceAutoUnit(inv, attemptIndex, rng, { protectCritical: false });
+                if (chosen) placementScore += chosen.score - 2500;
+            });
+
+            critical.forEach(inv => {
+                const chosen = tryPlaceAutoUnit(inv, attemptIndex, rng, { protectCritical: true });
                 if (chosen) placementScore += chosen.score;
             });
 
             const gapBefore = tryFillAutoSingleBayTwentySlots(attemptIndex, rng, { protectCritical: true, hullLimitedOnly: true });
             placementScore += gapBefore.score;
 
-            // Enquanto ainda houver especial sobrando, cargas comuns não gastam as bays críticas.
+            // Enquanto ainda houver especial/reefer sobrando, cargas comuns não gastam as bays críticas
+            // nem bloqueiam a bay 35 pela bay 33 com 40'/45'/OL.
             const criticalStillLeft = globalInventory.some(inv => isCriticalAutoCargo(inv) && ((parseInt(inv.qty, 10) || 0) > (parseInt(inv.placed, 10) || 0)));
             rest.forEach(inv => {
-                const chosen = tryPlaceAutoUnit(inv, attemptIndex, rng, { protectCritical: criticalStillLeft && (attemptIndex % 5 !== 0) });
+                const chosen = tryPlaceAutoUnit(inv, attemptIndex, rng, { protectCritical: criticalStillLeft || hasRemainingAutoReeferCargo() || (attemptIndex % 5 !== 0) });
                 if (chosen) placementScore += chosen.score;
             });
 
@@ -2557,6 +2712,200 @@
             placementScore += gapAfter.score;
 
             return finishAutoAttemptResult(attemptIndex, placementScore, 'reserva rígida + 20 em slots de casco');
+        }
+
+        function buildRemainingAutoReeferUnits(attemptIndex, rng) {
+            const units = [];
+            globalInventory.forEach(inv => {
+                if (!isReeferInventory(inv)) return;
+                const remaining = Math.max(0, (parseInt(inv.qty, 10) || 0) - (parseInt(inv.placed, 10) || 0));
+                for (let i = 0; i < remaining; i++) units.push(inv);
+            });
+            // Pequena variação para evitar sempre a mesma pilha, mas mantendo a família reefer junta.
+            units.sort((a, b) => {
+                const apol = getOrderIndex(POL_ORDER, a.pol), bpol = getOrderIndex(POL_ORDER, b.pol);
+                const apod = getOrderIndex(POD_ORDER, a.pod), bpod = getOrderIndex(POD_ORDER, b.pod);
+                let sa = apol * 500 + (POD_ORDER.length - 1 - Math.min(apod, POD_ORDER.length - 1)) * 1600;
+                let sb = bpol * 500 + (POD_ORDER.length - 1 - Math.min(bpod, POD_ORDER.length - 1)) * 1600;
+                if (attemptIndex % 4 !== 0) { sa += (rng() - 0.5) * 450; sb += (rng() - 0.5) * 450; }
+                return sa - sb;
+            });
+            return units;
+        }
+
+        function buildAutoReeferStackLanes(attemptIndex, rng) {
+            const lanes = [];
+            REEFER_BAYS.forEach(bayId => {
+                ensureBayStorage(bayId);
+                const grid = bayGrids[bayId];
+                if (!grid) return;
+                grid.cols.forEach(col => {
+                    // Convés primeiro porque é a prioridade operacional dos reefers.
+                    lanes.push({ bayId, col, rows: [...grid.rowsAbove].reverse(), section: 'convés' });
+                    lanes.push({ bayId, col, rows: [...grid.rowsBelow].reverse(), section: 'porão' });
+                });
+            });
+            lanes.sort((a, b) => {
+                let sa = 0, sb = 0;
+                if (a.section === 'convés') sa -= 900;
+                if (b.section === 'convés') sb -= 900;
+                // Alterna levemente entre preencher 35 primeiro e 37/39 primeiro.
+                const bayBiasA = parseInt(a.bayId, 10) || 0;
+                const bayBiasB = parseInt(b.bayId, 10) || 0;
+                sa += (attemptIndex % 2 === 0 ? bayBiasA : -bayBiasA) * 1.5;
+                sb += (attemptIndex % 2 === 0 ? bayBiasB : -bayBiasB) * 1.5;
+                sa += getColumnCenterDistance(a.bayId, a.col) * (attemptIndex % 3 === 0 ? 8 : 3);
+                sb += getColumnCenterDistance(b.bayId, b.col) * (attemptIndex % 3 === 0 ? 8 : 3);
+                sa += (rng() - 0.5) * (attemptIndex % 5 === 0 ? 35 : 120);
+                sb += (rng() - 0.5) * (attemptIndex % 5 === 0 ? 35 : 120);
+                return sa - sb;
+            });
+            return lanes;
+        }
+
+        function scoreAutoReeferStackFit(inv, bayId, row, col, laneRows, attemptIndex, rng) {
+            const level = getVerticalLevelFromBottom(bayId, row);
+            const maxLevel = Math.max(1, (laneRows || []).length - 1);
+            const t = Math.max(0, Math.min(1, level / maxLevel));
+            const pol = Math.min(getOrderIndex(POL_ORDER, inv.pol), POL_ORDER.length - 1);
+            const pod = Math.min(getOrderIndex(POD_ORDER, inv.pod), POD_ORDER.length - 1);
+            let score = scoreAutoCandidate(inv, bayId, row, col);
+
+            // No fundo da pilha, favorece descarga tardia. No topo, favorece descarga cedo.
+            score += (1 - t) * (POD_ORDER.length - 1 - pod) * 1700;
+            score += t * pod * 1350;
+            // Carregamento antigo no fundo e carregamento mais recente no topo.
+            score += (1 - t) * pol * 520;
+            score += t * (POL_ORDER.length - 1 - pol) * 260;
+
+            if (isDeckRow(bayId, row)) score -= 1200;
+            else score += 1400;
+            if (attemptIndex % 7 === 0 && bayId === '35') score -= 250;
+            if (attemptIndex % 7 === 3 && (bayId === '37' || bayId === '39')) score -= 250;
+            score += (rng() - 0.5) * (attemptIndex % 2 === 0 ? 300 : 900);
+            return score;
+        }
+
+        function placeReefersByStackLanes(attemptIndex, rng) {
+            let placed = 0;
+            let placementScore = 0;
+            const lanes = buildAutoReeferStackLanes(attemptIndex, rng);
+
+            for (let lane of lanes) {
+                for (let row of lane.rows) {
+                    const remaining = buildRemainingAutoReeferUnits(attemptIndex, rng);
+                    if (!remaining.length) return { placed, score: placementScore };
+                    let bestIdx = -1;
+                    let bestScore = Infinity;
+
+                    for (let i = 0; i < remaining.length; i++) {
+                        const inv = remaining[i];
+                        const validation = validateAutoPlacement(inv, lane.bayId, row, lane.col);
+                        if (!validation.ok) continue;
+                        const sc = scoreAutoReeferStackFit(inv, lane.bayId, row, lane.col, lane.rows, attemptIndex, rng);
+                        if (sc < bestScore) { bestScore = sc; bestIdx = i; }
+                    }
+
+                    if (bestIdx !== -1) {
+                        const inv = remaining[bestIdx];
+                        commitAutoPlacement(inv, lane.bayId, row, lane.col);
+                        placementScore += bestScore - 4200;
+                        placed++;
+                    }
+                }
+            }
+            return { placed, score: placementScore };
+        }
+
+        function runReeferStackFocusedAutoAttempt(attemptIndex) {
+            clearAutoStowedCargoOnly();
+            const seed = ((Date.now() & 0xffffffff) ^ Math.imul(attemptIndex + 131, 1103515245)) >>> 0;
+            const rng = createAutoRng(seed);
+            const units = buildAutoUnitOrder(attemptIndex, rng);
+            const imos = units.filter(inv => isImoInventory(inv) && !isReeferInventory(inv));
+            const specials = units.filter(inv => !isReeferInventory(inv) && !isImoInventory(inv) && (hasMod(inv, 'ow') || hasMod(inv, 'oh') || hasMod(inv, 'ol')));
+            const large = units.filter(inv => !isCriticalAutoCargo(inv) && (inv.size === '40' || inv.size === '45'));
+            const rest = units.filter(inv => !isCriticalAutoCargo(inv) && inv.size !== '40' && inv.size !== '45');
+            let placementScore = 0;
+
+            const stackReefers = placeReefersByStackLanes(attemptIndex, rng);
+            placementScore += stackReefers.score;
+            // Depois da montagem por pilhas, usa o método antigo para aproveitar buracos restantes.
+            const looseReefers = placeRemainingReefersFirst(attemptIndex, rng, { strict: true });
+            placementScore += looseReefers.score;
+
+            imos.forEach(inv => {
+                const chosen = tryPlaceAutoUnit(inv, attemptIndex, rng, { protectCritical: true });
+                if (chosen) placementScore += chosen.score - 600;
+            });
+
+            specials.forEach(inv => {
+                const chosen = tryPlaceAutoUnit(inv, attemptIndex, rng, { protectCritical: true });
+                if (chosen) placementScore += chosen.score;
+            });
+
+            const gapProtected = tryFillAutoSingleBayTwentySlots(attemptIndex, rng, { protectCritical: true, hullLimitedOnly: true });
+            placementScore += gapProtected.score;
+
+            large.forEach(inv => {
+                const chosen = tryPlaceAutoUnit(inv, attemptIndex, rng, { protectCritical: hasRemainingAutoReeferCargo() || (attemptIndex % 6 !== 0) });
+                if (chosen) placementScore += chosen.score;
+            });
+
+            rest.forEach(inv => {
+                const chosen = tryPlaceAutoUnit(inv, attemptIndex, rng, { protectCritical: hasRemainingAutoReeferCargo() || (attemptIndex % 5 !== 0) });
+                if (chosen) placementScore += chosen.score;
+            });
+
+            const gapFinal = tryFillAutoSingleBayTwentySlots(attemptIndex, rng, { protectCritical: false });
+            placementScore += gapFinal.score;
+
+            return finishAutoAttemptResult(attemptIndex, placementScore, 'reefer por pilhas + arremate');
+        }
+
+        function runReeferFirstAutoAttempt(attemptIndex) {
+            clearAutoStowedCargoOnly();
+            const seed = ((Date.now() & 0xffffffff) ^ Math.imul(attemptIndex + 71, 1597334677)) >>> 0;
+            const rng = createAutoRng(seed);
+            const units = buildAutoUnitOrder(attemptIndex, rng);
+            const imos = units.filter(inv => isImoInventory(inv) && !isReeferInventory(inv));
+            const specials = units.filter(inv => !isReeferInventory(inv) && !isImoInventory(inv) && (hasMod(inv, 'ow') || hasMod(inv, 'oh') || hasMod(inv, 'ol')));
+            const large = units.filter(inv => !isCriticalAutoCargo(inv) && (inv.size === '40' || inv.size === '45'));
+            const rest = units.filter(inv => !isCriticalAutoCargo(inv) && inv.size !== '40' && inv.size !== '45');
+            let placementScore = 0;
+
+            const reef = placeRemainingReefersFirst(attemptIndex, rng, { strict: true });
+            placementScore += reef.score;
+
+            imos.forEach(inv => {
+                const chosen = tryPlaceAutoUnit(inv, attemptIndex, rng, { protectCritical: true });
+                if (chosen) placementScore += chosen.score - 600;
+            });
+
+            specials.forEach(inv => {
+                const chosen = tryPlaceAutoUnit(inv, attemptIndex, rng, { protectCritical: true });
+                if (chosen) placementScore += chosen.score;
+            });
+
+            // Só usa o preenchimento de 20' depois que a fase reefer terminou, e sempre protegendo
+            // a área reefer/IMO durante a fase de carga comum.
+            const gapProtected = tryFillAutoSingleBayTwentySlots(attemptIndex, rng, { protectCritical: true, hullLimitedOnly: true });
+            placementScore += gapProtected.score;
+
+            large.forEach(inv => {
+                const chosen = tryPlaceAutoUnit(inv, attemptIndex, rng, { protectCritical: hasRemainingAutoReeferCargo() || (attemptIndex % 6 !== 0) });
+                if (chosen) placementScore += chosen.score;
+            });
+
+            rest.forEach(inv => {
+                const chosen = tryPlaceAutoUnit(inv, attemptIndex, rng, { protectCritical: hasRemainingAutoReeferCargo() || (attemptIndex % 5 !== 0) });
+                if (chosen) placementScore += chosen.score;
+            });
+
+            const gapFinal = tryFillAutoSingleBayTwentySlots(attemptIndex, rng, { protectCritical: false });
+            placementScore += gapFinal.score;
+
+            return finishAutoAttemptResult(attemptIndex, placementScore, 'reefer-first absoluto + proteção bay 33');
         }
 
         function getAutoStackUnitBias(inv, bayId, row, col, attemptIndex, rng) {
@@ -2661,18 +3010,24 @@
             const seed = ((Date.now() & 0xffffffff) ^ Math.imul(attemptIndex + 59, 374761393)) >>> 0;
             const rng = createAutoRng(seed);
             const units = buildAutoUnitOrder(attemptIndex, rng);
-            const critical = units.filter(isCriticalAutoCargo);
+            const reefers = units.filter(isReeferInventory);
+            const critical = units.filter(inv => isCriticalAutoCargo(inv) && !isReeferInventory(inv));
             const large = units.filter(inv => !isCriticalAutoCargo(inv) && (inv.size === '40' || inv.size === '45'));
             const rest = units.filter(inv => !isCriticalAutoCargo(inv) && inv.size !== '40' && inv.size !== '45');
             let placementScore = 0;
 
-            critical.forEach(inv => {
+            reefers.forEach(inv => {
                 const chosen = tryPlaceAutoUnit(inv, attemptIndex, rng, { protectCritical: false });
+                if (chosen) placementScore += chosen.score - 2500;
+            });
+
+            critical.forEach(inv => {
+                const chosen = tryPlaceAutoUnit(inv, attemptIndex, rng, { protectCritical: true });
                 if (chosen) placementScore += chosen.score;
             });
 
             large.forEach(inv => {
-                const chosen = tryPlaceAutoUnit(inv, attemptIndex, rng, { protectCritical: attemptIndex % 3 !== 0 });
+                const chosen = tryPlaceAutoUnit(inv, attemptIndex, rng, { protectCritical: hasRemainingAutoReeferCargo() || attemptIndex % 3 !== 0 });
                 if (chosen) placementScore += chosen.score;
             });
 
@@ -2753,6 +3108,20 @@
         function removeDirectedAutoBlockers(seedResult, attemptIndex, rng) {
             const profile = getDominantAutoFailureProfile(seedResult ? seedResult.failures : []);
             let placements = collectCurrentAutoPlacements();
+            const removed = [];
+
+            // Reparo reefer agressivo: se o gargalo é reefer, primeiro limpa tudo que esteja
+            // usando ou bloqueando fisicamente a área reefer, sem remover reefers já alocados.
+            if (profile.category === 'Reefer') {
+                const hardBlockers = placements.filter(isReeferAreaBlockerPlacement);
+                hardBlockers.forEach(p => {
+                    removeAutoPlacement(p);
+                    removed.push(p.inv);
+                });
+                const hardKeys = new Set(hardBlockers.map(p => `${p.invId}-${p.bayId}-${p.coord}`));
+                placements = placements.filter(p => !hardKeys.has(`${p.invId}-${p.bayId}-${p.coord}`));
+            }
+
             placements = placements.map(p => {
                 let score = 0;
                 if (profile.category === 'Reefer') {
@@ -2775,9 +3144,8 @@
                 return { ...p, removeScore: score };
             }).sort((a, b) => a.removeScore - b.removeScore);
 
-            const baseRemove = 12 + (attemptIndex % 9) * 4;
+            const baseRemove = profile.category === 'Reefer' ? 30 + (attemptIndex % 7) * 6 : 12 + (attemptIndex % 9) * 4;
             const maxRemove = Math.min(placements.length, baseRemove + Math.floor(placements.length * (attemptIndex % 5) / 100));
-            const removed = [];
             for (let i = 0; i < maxRemove; i++) {
                 const p = placements[i];
                 if (!p) continue;
@@ -2801,12 +3169,19 @@
             repairInfo.removed.forEach(inv => { if (inv && inv.id) priorityIds.add(inv.id); });
 
             let placementScore = seedResult.placementScore || 0;
+
+            if (repairInfo.profile.category === 'Reefer') {
+                const reef = placeRemainingReefersFirst(attemptIndex, rng, { strict: true });
+                placementScore += reef.score;
+            }
+
             const gapRepair = tryFillAutoSingleBayTwentySlots(attemptIndex, rng, { protectCritical: true });
             placementScore += gapRepair.score;
-            const units = buildAutoRemainingUnits(attemptIndex, rng, priorityIds);
+            const units = buildAutoRemainingUnits(attemptIndex, rng, priorityIds)
+                .filter(inv => !(repairInfo.profile.category === 'Reefer' && isReeferInventory(inv)));
             units.forEach(inv => {
                 const protectCritical = priorityIds.size > 0 && !priorityIds.has(inv.id) && (attemptIndex % 4 !== 0);
-                const chosen = tryPlaceAutoUnit(inv, attemptIndex, rng, { protectCritical });
+                const chosen = tryPlaceAutoUnit(inv, attemptIndex, rng, { protectCritical: protectCritical || hasRemainingAutoReeferCargo() });
                 if (chosen) placementScore += chosen.score;
             });
 
@@ -2816,13 +3191,17 @@
         }
 
         function runHybridAutoAttempt(attemptIndex, bestResult, elitePool) {
-            if (attemptIndex === 0) return runReservedAutoAttempt(attemptIndex);
+            if (attemptIndex === 0) return runReeferStackFocusedAutoAttempt(attemptIndex);
             const hasElite = elitePool && elitePool.length > 0;
-            const mode = attemptIndex % 10;
-            if (hasElite && (mode === 2 || mode === 5 || mode === 8)) return runDirectedRepairAutoAttempt(attemptIndex, elitePool, bestResult);
+            const mode = attemptIndex % 16;
+            // Depois do diagnóstico, aumentamos bastante a presença dos modos reefer-first,
+            // agora alternando entre o método por unidade e o solver dedicado por pilhas.
+            if (mode === 0 || mode === 4 || mode === 9 || mode === 13) return runReeferStackFocusedAutoAttempt(attemptIndex);
+            if (mode === 3 || mode === 7 || mode === 11) return runReeferFirstAutoAttempt(attemptIndex);
+            if (hasElite && (mode === 2 || mode === 5 || mode === 8 || mode === 14)) return runDirectedRepairAutoAttempt(attemptIndex, elitePool, bestResult);
             if (mode === 1 || mode === 6) return runStackAutoAttempt(attemptIndex);
-            if (mode === 4 || mode === 9) return runTwentyGapFocusedAutoAttempt(attemptIndex);
-            if (mode === 3 || mode === 7) return runReservedAutoAttempt(attemptIndex);
+            if (mode === 10 || mode === 15) return runReservedAutoAttempt(attemptIndex);
+            if (mode === 12) return runTwentyGapFocusedAutoAttempt(attemptIndex);
             return runSingleAutoAttempt(attemptIndex);
         }
 
@@ -2929,7 +3308,7 @@ Continuar?`)) return;
             autoRuntime.modeStats = {};
             const capacityInfo = buildAutoCapacityDiagnostics();
 
-            setAutoProgress(0, attempts, 0, totalCargo, 'Iniciando busca híbrida: reserva rígida, pilhas, contêiner unitário e reparo elite...');
+            setAutoProgress(0, attempts, 0, totalCargo, 'Iniciando busca híbrida com foco em reefers: reefer-first, proteção bay 33, pilhas e reparo elite...');
             setAutoReport([`Testando ${attempts} possibilidade(s).`, 'O melhor plano encontrado será aplicado ao final.', ...capacityInfo.lines], true);
             setAutoBackgroundStatus(backgroundMode ? 'Segundo plano ligado. Pode trocar de aba/tela sem perder a busca.' : 'Segundo plano desligado.', backgroundMode ? 'running' : '');
             await autoYield();
