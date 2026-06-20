@@ -1,12 +1,77 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
+    <script>
+        // FIX GLOBAL: helper usado por painéis dinâmicos
+        (function () {
+            function _escapeHtml(value) {
+                return String(value == null ? '' : value)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#039;');
+            }
+            window.escapeHtml = _escapeHtml;
+            window.escapeHTML = _escapeHtml;
+            window.safeHtml = _escapeHtml;
+            window.stowageEscapeHtml = _escapeHtml;
+        })();
+
+        // FIX GUIA: remove qualquer modal antigo de guia, mesmo se ainda existir no HTML/cache
+        window.addEventListener('DOMContentLoaded', function () {
+            var welcome = document.getElementById('welcomeModal');
+            if (welcome) welcome.remove();
+            document.querySelectorAll('.modal-overlay').forEach(function (el) {
+                var txt = (el.textContent || '').toLowerCase();
+                if (txt.includes('stowage plan pro - espelhamento') || txt.includes('entendido, vamos começar') || txt.includes('mude as cores')) {
+                    el.remove();
+                }
+            });
+        });
+
+        // FIX CACHE: remove service workers/caches antigos que possam estar servindo HTML velho
+        window.addEventListener('load', function () {
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.getRegistrations()
+                    .then(function (regs) { regs.forEach(function (r) { r.unregister(); }); })
+                    .catch(function () {});
+            }
+            if ('caches' in window) {
+                caches.keys()
+                    .then(function (keys) {
+                        return Promise.all(keys.map(function (key) {
+                            if (key.indexOf('stowage-plan-') === 0) return caches.delete(key);
+                        }));
+                    })
+                    .catch(function () {});
+            }
+        });
+    </script>
+
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Stowage Plan Pro - Tracking Manual</title>
     <!-- Auto stowage: porão-first seletivo para reefers/cargas elegíveis -->
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+    <script>
+        (function(){
+            function stowageEscapeHtml(value) {
+                return String(value == null ? '' : value)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/\"/g, '&quot;')
+                    .replace(/'/g, '&#039;');
+            }
+            window._stowageEscapeHtml = stowageEscapeHtml;
+            window.safeHtml = stowageEscapeHtml;
+            window.escapeHtml = stowageEscapeHtml;
+            window.escapeHTML = stowageEscapeHtml;
+        })();
+    </script>
 
     <style>
         :root {
@@ -432,17 +497,7 @@
         <p>Isso pode levar alguns segundos. Não feche a página.</p>
     </div>
 
-    <div id="welcomeModal" class="modal-overlay">
-        <div class="modal-content">
-            <h2>🚢 Stowage Plan Pro - Espelhamento Físico</h2>
-            <ul>
-                <li><strong style="color: #d9534f;">MUDE AS CORES (OBRIGATÓRIO):</strong> Vá na aba "1. Lista de Carga", logo abaixo, e altere a paleta de cores dos portos clicando nas caixas de cor.</li>
-                <li><strong>Sincronia Total (Gêmeas):</strong> As plantas IMO, REEFER e Normal estão conectadas. Se você alocar, apagar ou alterar o formato de uma, as outras copiam automaticamente.</li>
-                <li><strong>Filtro Visual:</strong> Você tem liberdade de estivagem. A planta "33 Normal" mostrará tudo. Mas a planta "33 REEFER" só mostrará o desenho colorido se a carga for Reefer. Cargas que não pertencem àquela planta ficarão escondidas sob o símbolo de ocupação "⇄".</li>
-            </ul>
-            <button id="closeModalBtn" class="btn-start" onclick="document.getElementById('welcomeModal').style.display='none'">Entendido, vamos começar!</button>
-        </div>
-    </div>
+    <!-- Guia inicial removido a pedido do usuário. -->
 
     <header>
         <div class="header-title">
@@ -1282,8 +1337,7 @@
 
             setupGridEditControls(); setupJsonExportImport(); syncInventoryFromTable();
             
-            if(localStorage.getItem('stowagePlanData') === null) { document.getElementById('welcomeModal').style.display = 'flex'; } 
-            else { document.getElementById('welcomeModal').style.display = 'none'; }
+            // Guia inicial removido: não exibe modal ao abrir o app.
         }
 
         function getSiblingBay(bayId) {
@@ -1371,6 +1425,11 @@
             });
         }
 
+        function safeHtml(text) { return window._stowageEscapeHtml(text); }
+        window.safeHtml = window._stowageEscapeHtml;
+        window.escapeHtml = window._stowageEscapeHtml;
+        window.escapeHTML = window._stowageEscapeHtml;
+
         function renderManualPickSelect() {
             const select = document.getElementById('manualPickSelect');
             const info = document.getElementById('manualPickInfo');
@@ -1382,12 +1441,12 @@
             let html = `<option value="">Selecione uma carga pendente...</option>`;
             if (pending.length) {
                 html += `<optgroup label="Pendentes para colocar manualmente">`;
-                pending.forEach(inv => { html += `<option value="${inv.id}">${escapeHtml(formatInventoryLabel(inv))}</option>`; });
+                pending.forEach(inv => { html += `<option value="${inv.id}">${window._stowageEscapeHtml(formatInventoryLabel(inv))}</option>`; });
                 html += `</optgroup>`;
             }
             if (complete.length) {
                 html += `<optgroup label="Completos / sem saldo">`;
-                complete.forEach(inv => { html += `<option value="${inv.id}" disabled>OK — ${escapeHtml(formatInventoryLabel(inv, 0))}</option>`; });
+                complete.forEach(inv => { html += `<option value="${inv.id}" disabled>OK — ${window._stowageEscapeHtml(formatInventoryLabel(inv, 0))}</option>`; });
                 html += `</optgroup>`;
             }
             select.innerHTML = html;
@@ -1398,7 +1457,7 @@
                 const inv = globalInventory.find(i => i.id === activeInvId);
                 if (inv) {
                     const remaining = Math.max(0, (parseInt(inv.qty, 10) || 0) - (parseInt(inv.placed, 10) || 0));
-                    info.innerHTML = `<strong>Selecionado:</strong> ${escapeHtml(formatInventoryLabel(inv, remaining))}. Toque em uma célula livre para inserir; toque em célula ocupada para remover.`;
+                    info.innerHTML = `<strong>Selecionado:</strong> ${window._stowageEscapeHtml(formatInventoryLabel(inv, remaining))}. Toque em uma célula livre para inserir; toque em célula ocupada para remover.`;
                 } else {
                     const totalPending = pending.reduce((sum, inv) => sum + Math.max(0, (parseInt(inv.qty, 10) || 0) - (parseInt(inv.placed, 10) || 0)), 0);
                     info.innerHTML = `<strong>Pendentes:</strong> ${totalPending}. Escolha uma carga aqui ou na lista abaixo, depois toque na bay.`;
@@ -2132,14 +2191,18 @@
             return val;
         }
 
-        function escapeAutoHtml(text) {
+        function escapeHtml(text) { return window._stowageEscapeHtml(text); }
+
+        function escapeHtmlLegacy_unused(text) {
             return String(text)
                 .replace(/&/g, '&amp;')
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;')
+                .replace(/\"/g, '&quot;')
                 .replace(/'/g, '&#039;');
         }
+
+        function escapeAutoHtml(text) { return window._stowageEscapeHtml(text); }
 
         const autoRuntime = {
             inventoryById: null,
