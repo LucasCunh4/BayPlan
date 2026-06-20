@@ -3,7 +3,7 @@
   Coloque este arquivo na raiz pública do site, acessível como: /sw.js
 */
 
-const SW_VERSION = '2026-06-19-v1';
+const SW_VERSION = '2026-06-19-v2';
 const STATIC_CACHE = `stowage-plan-static-${SW_VERSION}`;
 const RUNTIME_CACHE = `stowage-plan-runtime-${SW_VERSION}`;
 const HTML_CACHE = `stowage-plan-html-${SW_VERSION}`;
