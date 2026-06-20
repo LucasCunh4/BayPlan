@@ -674,7 +674,7 @@
                                 <input type="number" id="autoUiInterval" min="1" max="500" step="5" value="25">
                             </label>
                         </div>
-                        <div class="auto-stow-hint">0 s = sem limite de tempo. Combina reefer porão-first, reparo direcionado Reefer elite, deduplicação de tentativas, correção de apoio em degrau, espinha dorsal POL cedo/POD tardio, proteção bay 33, pilha por pilha, contêiner por contêiner e modo manual preservado. A regra de POD voltou a ser rígida; a tela só atualiza de tempos em tempos para ganhar velocidade.</div>
+                        <div class="auto-stow-hint">0 s = sem limite de tempo. Combina reefer porão-first, reparo direcionado Reefer elite, deduplicação de tentativas, correção de apoio em degrau, espinha dorsal POL cedo/POD tardio, proteção bay 33, pilha por pilha, contêiner por contêiner e modo manual preservado. POL é prioridade alta, POD é rígido inclusive entre porão e convés; a tela só atualiza de tempos em tempos para ganhar velocidade.</div>
                         <div class="auto-bg-row">
                             <label><input type="checkbox" id="autoBackgroundMode" checked> Continuar rodando ao sair da aba/tela</label>
                             <div id="autoBackgroundStatus" class="auto-bg-status">Enquanto a aba continuar aberta, a busca segue em segundo plano. Se fechar o navegador, ela para.</div>
@@ -1985,18 +1985,106 @@
             const topPod = getOrderIndex(POD_ORDER, topInv.pod);
             const bottomPod = getOrderIndex(POD_ORDER, bottomInv.pod);
 
-            // Sem remoções nesta versão: POL e POD voltam a ser regras rígidas de empilhamento.
-            // Em cima: carrega no mesmo POL ou depois; descarrega no mesmo POD ou antes.
+            // POL deixou de ser regra bloqueante: continua sendo prioridade forte na ordenação/pontuação,
+            // mas pode ser quebrado quando for necessário para completar o plano.
+            // POD continua rígido: em cima precisa sair no mesmo porto ou antes do contêiner de baixo.
             const polOk = topPol >= bottomPol;
             const podOk = topPod <= bottomPod;
             return {
-                ok: polOk && podOk,
+                ok: podOk,
                 removalCost: 0,
                 polOk,
                 podOk,
-                reason: !polOk ? 'POL incompatível com a pilha' : (!podOk ? 'POD incompatível com a pilha' : '')
+                reason: !podOk ? 'POD incompatível com a pilha' : ''
             };
         }
+
+        function getRowsPhysicallyAbove(bayId, row) {
+            const bay = normalizeBayBase(bayId);
+            const grid = bayGrids[bay];
+            if (!grid) return [];
+            const deckIdx = grid.rowsAbove.indexOf(row);
+            if (deckIdx !== -1) return grid.rowsAbove.slice(0, deckIdx);
+            const holdIdx = grid.rowsBelow.indexOf(row);
+            if (holdIdx !== -1) return [...grid.rowsAbove, ...grid.rowsBelow.slice(0, holdIdx)];
+            return [];
+        }
+
+        function getRowsPhysicallyBelow(bayId, row) {
+            const bay = normalizeBayBase(bayId);
+            const grid = bayGrids[bay];
+            if (!grid) return [];
+            const deckIdx = grid.rowsAbove.indexOf(row);
+            if (deckIdx !== -1) return [...grid.rowsAbove.slice(deckIdx + 1), ...grid.rowsBelow];
+            const holdIdx = grid.rowsBelow.indexOf(row);
+            if (holdIdx !== -1) return grid.rowsBelow.slice(holdIdx + 1);
+            return [];
+        }
+
+        function validatePODAccessAcrossVertical(inv, bayId, row, col) {
+            const bay = normalizeBayBase(bayId);
+            const invPod = getOrderIndex(POD_ORDER, inv && inv.pod);
+            const seenAbove = new Set();
+            const seenBelow = new Set();
+
+            for (let b of getPhysicalFootprintBays(bay, inv)) {
+                for (let aboveRow of getRowsPhysicallyAbove(b, row)) {
+                    const aboveInv = getActualInventoryAtPhysicalPosition(b, aboveRow, col);
+                    if (!aboveInv) continue;
+                    const key = `${aboveInv.id || '?'}-${b}-${aboveRow}-${col}-above`;
+                    if (seenAbove.has(key)) continue;
+                    seenAbove.add(key);
+                    if (getOrderIndex(POD_ORDER, aboveInv.pod) > invPod) {
+                        return { ok: false, reason: 'POD bloqueado por contêiner acima/deck' };
+                    }
+                }
+
+                for (let belowRow of getRowsPhysicallyBelow(b, row)) {
+                    const belowInv = getActualInventoryAtPhysicalPosition(b, belowRow, col);
+                    if (!belowInv) continue;
+                    const key = `${belowInv.id || '?'}-${b}-${belowRow}-${col}-below`;
+                    if (seenBelow.has(key)) continue;
+                    seenBelow.add(key);
+                    if (invPod > getOrderIndex(POD_ORDER, belowInv.pod)) {
+                        return { ok: false, reason: 'POD bloquearia contêiner abaixo/porão' };
+                    }
+                }
+            }
+
+            return { ok: true, reason: '' };
+        }
+
+        function getPolSoftPriorityPenaltyForPlacement(inv, bayId, row, col) {
+            const bay = normalizeBayBase(bayId);
+            const invPol = getOrderIndex(POL_ORDER, inv && inv.pol);
+            let penalty = 0;
+            const seen = new Set();
+
+            for (let b of getPhysicalFootprintBays(bay, inv)) {
+                for (let belowRow of getRowsPhysicallyBelow(b, row)) {
+                    const belowInv = getActualInventoryAtPhysicalPosition(b, belowRow, col);
+                    if (!belowInv) continue;
+                    const key = `${belowInv.id || '?'}-${b}-${belowRow}-${col}-below`;
+                    if (seen.has(key)) continue;
+                    seen.add(key);
+                    const belowPol = getOrderIndex(POL_ORDER, belowInv.pol);
+                    if (invPol < belowPol) penalty += 9000;
+                }
+
+                for (let aboveRow of getRowsPhysicallyAbove(b, row)) {
+                    const aboveInv = getActualInventoryAtPhysicalPosition(b, aboveRow, col);
+                    if (!aboveInv) continue;
+                    const key = `${aboveInv.id || '?'}-${b}-${aboveRow}-${col}-above`;
+                    if (seen.has(key)) continue;
+                    seen.add(key);
+                    const abovePol = getOrderIndex(POL_ORDER, aboveInv.pol);
+                    if (abovePol < invPol) penalty += 9000;
+                }
+            }
+
+            return penalty;
+        }
+
 
         function isStackPairCompatible(topInv, bottomInv) {
             const rel = getAutoStackRelation(topInv, bottomInv);
@@ -2067,6 +2155,9 @@
                 return { ok: false, reason: 'contêiner voando' };
             }
 
+            const verticalPODAccess = validatePODAccessAcrossVertical(inv, bay, row, col);
+            if (!verticalPODAccess.ok) return verticalPODAccess;
+
             if (hasMod(inv, 'oh') || inv.base === 'oh40' || inv.base === 'oh45') {
                 for (let b of footprintBays) {
                     if (above && isPhysicalPositionOccupied(b, above, col)) return { ok: false, reason: 'OH com contêiner acima' };
@@ -2092,7 +2183,7 @@
                     if (!aboveInv) continue;
                     if (aboveInv.size === '20' && (inv.size === '40' || inv.size === '45')) return { ok: false, reason: "criaria 20' sobre 40'/45'" };
                     const rel = addStackRelation(aboveInv, inv);
-                    if (!rel.ok) return { ok: false, reason: rel.reason === 'POL incompatível com a pilha' ? 'POL incompatível com contêiner acima' : rel.reason };
+                    if (!rel.ok) return { ok: false, reason: rel.reason };
                 }
             }
 
@@ -2120,6 +2211,7 @@
 
             if (hasMod(inv, 'oh')) score -= level * 15;
             if (hasMod(inv, 'ow')) score += center * 10;
+            score += getPolSoftPriorityPenaltyForPlacement(inv, bayId, row, col);
             if (inv.size === '40' || inv.size === '45') score -= 80;
             if (inv.size === '20') {
                 score += 30;
@@ -2970,7 +3062,7 @@
                 lines.push(`Uso do porão no melhor plano: ${holdUse.totalHold} contêiner(es) no porão; ${holdUse.reeferHold} reefer(s) no porão; ${holdUse.latePodHold} com destino tardio no porão.`);
                 const reefAudit = analyzeAutoEmptyReeferFootprints(bestResult && bestResult.savedShip ? bestResult.savedShip : null);
                 lines.push(`Auditoria reefer 40': espaços vazios estruturais — porão ${reefAudit.emptyHold40} (${reefAudit.supportedHold40} já com apoio), convés ${reefAudit.emptyDeck40} (${reefAudit.supportedDeck40} já com apoio).`);
-                lines.push('Nesta versão, os reefers são resolvidos primeiro como subproblema próprio: porão por coluna com apoio em degrau de casco e espinha dorsal POL cedo/POD tardio, depois convés, sem remoções.');
+                lines.push('Nesta versão, os reefers são resolvidos primeiro como subproblema próprio: porão por coluna com apoio em degrau de casco; POL é prioridade alta, e POD é rígido inclusive entre porão e convés.');
             } catch(e) {
                 lines.push('Não foi possível calcular a capacidade teórica nesta execução.');
             }
@@ -2997,8 +3089,8 @@
             const reasonText = Object.keys(byReason).join(' | ').toLowerCase();
             if ((byCategory['Reefer'] || 0) > 0) hints.push('gargalo provável nas bays reefer 35/37/39; se não houver bloqueio por não-reefer, o problema tende a ser uso insuficiente do porão ou pilhas reefer incompatíveis por POL/POD.');
             if ((byCategory['IMO'] || 0) > 0) hints.push('gargalo provável no convés das bays IMO 01/11.');
-            if (reasonText.includes('pol')) hints.push('muitos bloqueios por ordem de carregamento POL, que continua sendo regra rígida.');
-            if (reasonText.includes('pod')) hints.push('muitos bloqueios por descarga POD; nesta versão a ordem de descarga voltou a ser rígida, sem remoções.');
+            if (reasonText.includes('pol')) hints.push('a ordem de carregamento POL agora é prioridade alta, não regra bloqueante; se aparecer aqui, é apenas efeito de diagnóstico antigo.');
+            if (reasonText.includes('pod')) hints.push('muitos bloqueios por descarga POD; a ordem de descarga continua rígida, inclusive entre porão e convés.');
             if (reasonText.includes('contêiner voando')) hints.push('a busca tentou posições altas sem apoio; pode estar faltando preencher bases compatíveis antes.');
             if (reasonText.includes("20' sobre 40") || reasonText.includes("40'/45")) hints.push("há conflito forte entre empilhamento de 20' e bases de 40'/45'.");
             if (reasonText.includes('ow') || reasonText.includes('oh') || reasonText.includes('ol')) hints.push('as cargas fora de medida estão bloqueando posições vizinhas/acima ou exigindo espaços livres difíceis.');
