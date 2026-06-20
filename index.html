@@ -165,6 +165,15 @@
         .auto-progress-bar { width: 0%; height: 100%; background: #5cb85c; border-radius: 999px; transition: width 0.12s linear; }
         .auto-progress-text { margin-top: 6px; font-size: 10px; color: #34495e; line-height: 1.25; user-select: text; }
 
+        .manual-pick-panel { margin-top: 10px; padding: 9px; background: #fffdf4; border: 1px solid #ead58a; border-radius: 6px; font-size: 11px; color: #4f4215; }
+        .manual-pick-panel h3 { margin: 0 0 7px 0; font-size: 12px; color: #4f4215; text-transform: uppercase; }
+        .manual-pick-select { width: 100%; padding: 7px; border: 1px solid #cdbb73; border-radius: 4px; font-size: 12px; font-weight: bold; background: #fff; color: #222; }
+        .manual-pick-info { margin-top: 6px; line-height: 1.25; color: #665822; user-select: text; }
+        .manual-pick-actions { display: flex; gap: 6px; margin-top: 7px; }
+        .manual-pick-actions button { flex: 1; padding: 6px 8px; border-radius: 4px; border: 1px solid #cdbb73; background: #fff; color: #4f4215; font-weight: bold; cursor: pointer; font-size: 10px; }
+        .manual-pick-actions button:hover { background: #fff7d6; }
+        .manual-mode-selected { outline: 3px solid #f39c12 !important; outline-offset: 2px; }
+
         /* PAINEL DE EXPANSÃO DA GRADE */
         .grid-edit-panel { background: #ffebee; border: 1px solid #ffcaca; border-radius: 6px; padding: 12px; margin-bottom: 15px; display: none; }
         .grid-edit-panel h4 { margin: 0 0 10px 0; color: #c9302c; font-size: 13px; text-align: center; }
@@ -573,6 +582,18 @@
                         <div id="autoProgressText" class="auto-progress-text">Aguardando início...</div>
                     </div>
                     <div id="autoStowReport" class="auto-stow-report"></div>
+
+                    <div id="manualPickPanel" class="manual-pick-panel">
+                        <h3>✋ Inserção manual</h3>
+                        <select id="manualPickSelect" class="manual-pick-select">
+                            <option value="">Selecione uma carga pendente...</option>
+                        </select>
+                        <div id="manualPickInfo" class="manual-pick-info">Escolha uma carga aqui ou na lista abaixo, depois toque em uma célula da bay para inserir/remover.</div>
+                        <div class="manual-pick-actions">
+                            <button id="btnManualDeselect" type="button">Desmarcar</button>
+                            <button id="btnManualShowPending" type="button">Atualizar pendentes</button>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="inventory-container">
@@ -1234,7 +1255,17 @@
             });
             
             baySelect.addEventListener('change', (e) => { currentPairIdx = parseInt(e.target.value); lastClickedCell = null; renderBayPairsUI(); });
-            document.getElementById('btnDeselect').addEventListener('click', () => { activeInvId = null; renderInventoryPalette(); });
+            document.getElementById('btnDeselect').addEventListener('click', () => { activeInvId = null; renderInventoryPalette(); renderManualPickSelect(); });
+            const manualPickSelectEl = document.getElementById('manualPickSelect');
+            if (manualPickSelectEl) manualPickSelectEl.addEventListener('change', (e) => {
+                activeInvId = e.target.value || null;
+                renderInventoryPalette();
+                renderManualPickSelect();
+            });
+            const manualDeselectBtn = document.getElementById('btnManualDeselect');
+            if (manualDeselectBtn) manualDeselectBtn.addEventListener('click', () => { activeInvId = null; renderInventoryPalette(); renderManualPickSelect(); });
+            const manualRefreshBtn = document.getElementById('btnManualShowPending');
+            if (manualRefreshBtn) manualRefreshBtn.addEventListener('click', () => { recalculateInventory(); renderInventoryPalette(); renderManualPickSelect(); });
             document.getElementById('toggleEditBtn').addEventListener('click', function() { currentState.editMode = !currentState.editMode; this.classList.toggle('active'); document.getElementById('canvasArea').classList.toggle('edit-mode-active'); document.getElementById('gridEditPanel').style.display = currentState.editMode ? 'block' : 'none'; lastClickedCell = null; renderBayPairsUI(); });
             document.getElementById('btnFilterIMO').addEventListener('click', function() { this.classList.toggle('active'); document.getElementById('canvasArea').classList.toggle('filter-imo'); });
             document.getElementById('btnFilterReefer').addEventListener('click', function() { this.classList.toggle('active'); document.getElementById('canvasArea').classList.toggle('filter-reefer'); });
@@ -1259,7 +1290,7 @@
             document.getElementById('cargoView').style.display = 'none'; document.getElementById('manualView').style.display = 'none';
 
             if(tab === 'cargo') { document.getElementById('tabCargo').classList.add('active'); document.getElementById('cargoView').style.display = 'flex'; document.getElementById('toggleEditBtn').style.display = 'none'; } 
-            else { document.getElementById('tabManual').classList.add('active'); document.getElementById('manualView').style.display = 'flex'; document.getElementById('toggleEditBtn').style.display = 'block'; syncInventoryFromTable(); renderBayPairsUI(); }
+            else { document.getElementById('tabManual').classList.add('active'); document.getElementById('manualView').style.display = 'flex'; document.getElementById('toggleEditBtn').style.display = 'block'; syncInventoryFromTable(); renderInventoryPalette(); renderManualPickSelect(); renderBayPairsUI(); }
         }
 
         // --- 4. FUNÇÕES DA TABELA DE CARGA (INPUT) ---
@@ -1311,10 +1342,66 @@
             recalculateInventory(); persistData();
         }
 
+
+        // --- 5A. SELETOR MANUAL RÁPIDO ---
+        function formatInventoryLabel(inv, remainingOverride = null) {
+            if (!inv) return '';
+            const remaining = remainingOverride !== null ? remainingOverride : Math.max(0, (parseInt(inv.qty, 10) || 0) - (parseInt(inv.placed, 10) || 0));
+            const mods = inv.mods && inv.mods.length ? ` ${inv.mods.join(', ').toUpperCase()}` : '';
+            return `${remaining}/${inv.qty} — ${inv.pod} | ${inv.size}' ${String(inv.base || '').toUpperCase()}${mods}`;
+        }
+
+        function getInventorySortedForManual() {
+            return [...globalInventory].sort((a, b) => {
+                const ar = Math.max(0, (parseInt(a.qty, 10) || 0) - (parseInt(a.placed, 10) || 0));
+                const br = Math.max(0, (parseInt(b.qty, 10) || 0) - (parseInt(b.placed, 10) || 0));
+                if ((br > 0) !== (ar > 0)) return (br > 0 ? 1 : 0) - (ar > 0 ? 1 : 0);
+                if (br !== ar) return br - ar;
+                const ap = getOrderIndex(POD_ORDER, a.pod);
+                const bp = getOrderIndex(POD_ORDER, b.pod);
+                return ap - bp || String(a.size).localeCompare(String(b.size)) || String(a.base).localeCompare(String(b.base));
+            });
+        }
+
+        function renderManualPickSelect() {
+            const select = document.getElementById('manualPickSelect');
+            const info = document.getElementById('manualPickInfo');
+            if (!select) return;
+
+            const current = activeInvId || '';
+            const pending = getInventorySortedForManual().filter(inv => Math.max(0, (parseInt(inv.qty, 10) || 0) - (parseInt(inv.placed, 10) || 0)) > 0);
+            const complete = getInventorySortedForManual().filter(inv => Math.max(0, (parseInt(inv.qty, 10) || 0) - (parseInt(inv.placed, 10) || 0)) <= 0);
+            let html = `<option value="">Selecione uma carga pendente...</option>`;
+            if (pending.length) {
+                html += `<optgroup label="Pendentes para colocar manualmente">`;
+                pending.forEach(inv => { html += `<option value="${inv.id}">${escapeHtml(formatInventoryLabel(inv))}</option>`; });
+                html += `</optgroup>`;
+            }
+            if (complete.length) {
+                html += `<optgroup label="Completos / sem saldo">`;
+                complete.forEach(inv => { html += `<option value="${inv.id}" disabled>OK — ${escapeHtml(formatInventoryLabel(inv, 0))}</option>`; });
+                html += `</optgroup>`;
+            }
+            select.innerHTML = html;
+            if (current && [...select.options].some(o => o.value === current && !o.disabled)) select.value = current;
+            else select.value = '';
+
+            if (info) {
+                const inv = globalInventory.find(i => i.id === activeInvId);
+                if (inv) {
+                    const remaining = Math.max(0, (parseInt(inv.qty, 10) || 0) - (parseInt(inv.placed, 10) || 0));
+                    info.innerHTML = `<strong>Selecionado:</strong> ${escapeHtml(formatInventoryLabel(inv, remaining))}. Toque em uma célula livre para inserir; toque em célula ocupada para remover.`;
+                } else {
+                    const totalPending = pending.reduce((sum, inv) => sum + Math.max(0, (parseInt(inv.qty, 10) || 0) - (parseInt(inv.placed, 10) || 0)), 0);
+                    info.innerHTML = `<strong>Pendentes:</strong> ${totalPending}. Escolha uma carga aqui ou na lista abaixo, depois toque na bay.`;
+                }
+            }
+        }
+
         // --- 5. PALETA LATERAL ---
         function renderInventoryPalette() {
             const list = document.getElementById('inventoryList'); list.innerHTML = '';
-            globalInventory.forEach(inv => {
+            getInventorySortedForManual().forEach(inv => {
                 let remaining = inv.qty - inv.placed; let isComplete = remaining <= 0; let isActive = activeInvId === inv.id;
                 let bgColor = `var(--port-${inv.pod.toLowerCase()})`; let layersHtml = '';
                 if(inv.base && inv.base !== 'dry') layersHtml += `<div class="layer base-${inv.base}"></div>`;
@@ -1325,13 +1412,14 @@
                 
                 el.innerHTML = `
                     <div class="palette-cell" style="background-color: ${bgColor};"><span class="palette-port" style="color: ${inv.base==='oh40' ? '#111' : '#000'}">${inv.pod}</span>${layersHtml}</div>
-                    <div class="palette-info"><div class="palette-title">${inv.size}' ${inv.base.toUpperCase()}</div><div class="palette-mods">${inv.mods.length ? inv.mods.join(', ').toUpperCase() : 'STANDARD'}</div></div>
+                    <div class="palette-info"><div class="palette-title">${remaining > 0 ? 'FALTA ' + remaining + ' • ' : ''}${inv.size}' ${inv.base.toUpperCase()}</div><div class="palette-mods">${inv.mods.length ? inv.mods.join(', ').toUpperCase() : 'STANDARD'}</div></div>
                     <div class="palette-counter ${isComplete ? 'zero' : ''}">${remaining}</div>
                 `;
                 list.appendChild(el);
             });
             let actItem = globalInventory.find(i => i.id === activeInvId);
             if (actItem && (actItem.qty - actItem.placed) <= 0) { activeInvId = null; setTimeout(renderInventoryPalette, 10); }
+            renderManualPickSelect();
         }
 
         // EVITA CONTAGEM DUPLA DAS GÊMEAS
@@ -2476,9 +2564,6 @@
                 const modeText = getTopAutoCounts(autoRuntime.modeStats, 8).map(([k, v]) => `${k} (${v})`).join(', ');
                 if (modeText) lines.push(`Modos testados: ${modeText}.`);
             }
-            if (autoRuntime.duplicateAttempts) {
-                lines.push(`Tentativas repetidas evitadas/re-sorteadas: ${autoRuntime.duplicateAttempts} (rerolls totais: ${autoRuntime.rerolledAttempts || 0}).`);
-            }
             if (bestResult) {
             }
             lines.push('');
@@ -2491,7 +2576,7 @@
                 lines.push(`Uso do porão no melhor plano: ${holdUse.totalHold} contêiner(es) no porão; ${holdUse.reeferHold} reefer(s) no porão; ${holdUse.latePodHold} com destino tardio no porão.`);
                 const reefAudit = analyzeAutoEmptyReeferFootprints(bestResult && bestResult.savedShip ? bestResult.savedShip : null);
                 lines.push(`Auditoria reefer 40': espaços vazios estruturais — porão ${reefAudit.emptyHold40} (${reefAudit.supportedHold40} já com apoio), convés ${reefAudit.emptyDeck40} (${reefAudit.supportedDeck40} já com apoio).`);
-                lines.push('Nesta versão, os reefers continuam porão-first, mas a busca usa mais reparo direcionado Reefer elite, evita repetir planos iguais e mantém o modo manual por pointer/click após a automática.');
+                lines.push('Nesta versão, os reefers são resolvidos primeiro como subproblema próprio: porão por coluna com apoio em degrau de casco e espinha dorsal POL cedo/POD tardio, depois convés, sem remoções.');
             } catch(e) {
                 lines.push('Não foi possível calcular a capacidade teórica nesta execução.');
             }
@@ -3480,7 +3565,52 @@
             return units.map(u => u.inv);
         }
 
+
+        function tryAutoExhaustiveLastMileFill(attemptIndex, rng, options = {}) {
+            // Última varredura leve: antes de avaliar a tentativa, tenta colocar sobras uma a uma
+            // em qualquer posição válida restante. Isso é barato e ajuda justamente quando falta 1-15 unidades.
+            let placed = 0;
+            let score = 0;
+            const maxPasses = options.maxPasses || 3;
+            for (let pass = 0; pass < maxPasses; pass++) {
+                let improved = false;
+                const units = [];
+                globalInventory.forEach(inv => {
+                    const remaining = Math.max(0, (parseInt(inv.qty, 10) || 0) - (parseInt(inv.placed, 10) || 0));
+                    for (let i = 0; i < remaining; i++) units.push(inv);
+                });
+                if (!units.length) break;
+                units.sort((a, b) => {
+                    const ar = Math.max(0, (parseInt(a.qty, 10) || 0) - (parseInt(a.placed, 10) || 0));
+                    const br = Math.max(0, (parseInt(b.qty, 10) || 0) - (parseInt(b.placed, 10) || 0));
+                    // Reefers e cargas com pouca sobra primeiro; 20' por último como arremate.
+                    const ac = (isReeferInventory(a) ? -100000 : 0) + (isImoInventory(a) ? -50000 : 0) + ar * 10 + (a.size === '20' ? -250 : 0);
+                    const bc = (isReeferInventory(b) ? -100000 : 0) + (isImoInventory(b) ? -50000 : 0) + br * 10 + (b.size === '20' ? -250 : 0);
+                    return ac - bc || getOrderIndex(POD_ORDER, a.pod) - getOrderIndex(POD_ORDER, b.pod);
+                });
+                for (let inv of units) {
+                    const chosen = tryPlaceAutoUnit(inv, attemptIndex + pass * 997, rng, {
+                        protectCritical: false,
+                        scoreAdjust: isReeferInventory(inv) ? getAutoReeferHoldFirstBias : undefined
+                    });
+                    if (chosen) {
+                        placed++;
+                        score += chosen.score - 25000;
+                        improved = true;
+                    }
+                }
+                const gap = tryFillAutoSingleBayTwentySlots(attemptIndex + pass * 577, rng, { protectCritical: false });
+                if (gap && gap.score) score += gap.score;
+                if (!improved) break;
+            }
+            if (placed && autoRuntime) autoRuntime.lastMileFillPlaced = (autoRuntime.lastMileFillPlaced || 0) + placed;
+            return { placed, score };
+        }
+
         function finishAutoAttemptResult(attemptIndex, placementScore, modeLabel) {
+            const finalRng = createAutoRng((((Date.now() & 0xffffffff) ^ Math.imul(attemptIndex + 909, 1013904223)) >>> 0));
+            const finalFill = tryAutoExhaustiveLastMileFill(attemptIndex, finalRng, { maxPasses: 3 });
+            placementScore += finalFill.score || 0;
             recalculateInventoryCountsOnly();
             const failures = [];
             globalInventory.forEach(inv => {
@@ -3898,8 +4028,11 @@
                 return { ...p, removeScore: score };
             }).sort((a, b) => a.removeScore - b.removeScore);
 
-            const baseRemove = profile.category === 'Reefer' ? 30 + (attemptIndex % 7) * 6 : 12 + (attemptIndex % 9) * 4;
-            const maxRemove = Math.min(placements.length, baseRemove + Math.floor(placements.length * (attemptIndex % 5) / 100));
+            const isMicroRepair = profile && profile.micro === true;
+            const baseRemove = isMicroRepair
+                ? (profile.category === 'Reefer' ? 4 + (attemptIndex % 6) : 3 + (attemptIndex % 4))
+                : (profile.category === 'Reefer' ? 30 + (attemptIndex % 7) * 6 : 12 + (attemptIndex % 9) * 4);
+            const maxRemove = Math.min(placements.length, baseRemove + (isMicroRepair ? 0 : Math.floor(placements.length * (attemptIndex % 5) / 100)));
             for (let i = 0; i < maxRemove; i++) {
                 const p = placements[i];
                 if (!p) continue;
@@ -3981,6 +4114,38 @@
             return result;
         }
 
+
+        function runMicroReeferEliteRepairAutoAttempt(attemptIndex, elitePool, bestResult) {
+            const seed = ((Date.now() & 0xffffffff) ^ Math.imul(attemptIndex + 12345, 747796405)) >>> 0;
+            const rng = createAutoRng(seed);
+            const seedResult = (bestResult && bestResult.savedShip) ? bestResult : (chooseAutoEliteSeed(elitePool, rng, true) || bestResult);
+            if (!seedResult || !seedResult.savedShip) return runForcedReeferEliteRepairAutoAttempt(attemptIndex, elitePool, bestResult);
+
+            applyBestAutoResultToState(seedResult, false, false);
+            const forcedProfile = { category: 'Reefer', reason: 'micro reparo reefer a partir da melhor tentativa', micro: true };
+            const repairInfo = removeDirectedAutoBlockers(seedResult, attemptIndex, rng, forcedProfile);
+            const priorityIds = new Set();
+            (seedResult.failures || []).map(normalizeAutoFailureRecord).forEach(f => { if (f.invId) priorityIds.add(f.invId); });
+            repairInfo.removed.forEach(inv => { if (inv && inv.id) priorityIds.add(inv.id); });
+
+            let placementScore = (seedResult.placementScore || 0) - 500;
+            const reef = placeReefersHoldFirstSelective(attemptIndex + 61, rng, { strict: true });
+            placementScore += reef.score - reef.placed * 14000;
+            const reefRest = finishAutoReeferPoolByCandidates(buildRemainingAutoReeferPool(attemptIndex + 71, rng), attemptIndex + 71, rng, autoRuntime.lastReeferColumnAudit || {});
+            placementScore += reefRest.score - reefRest.placed * 9000;
+
+            const gap = tryFillAutoSingleBayTwentySlots(attemptIndex + 83, rng, { protectCritical: false });
+            placementScore += gap.score;
+            buildAutoRemainingUnits(attemptIndex + 97, rng, priorityIds).forEach(inv => {
+                const chosen = tryPlaceAutoUnit(inv, attemptIndex + 97, rng, { protectCritical: hasRemainingAutoReeferCargo() && !isReeferInventory(inv) });
+                if (chosen) placementScore += chosen.score;
+            });
+
+            const result = finishAutoAttemptResult(attemptIndex, placementScore, 'micro reparo direcionado (Reefer elite)');
+            result.repairProfile = forcedProfile;
+            return result;
+        }
+
         function runHybridAutoAttempt(attemptIndex, bestResult, elitePool) {
             resetAutoAttemptRemovalCounters(attemptIndex);
             if (attemptIndex === 0) return runHoldFirstAutoAttempt(attemptIndex);
@@ -3989,22 +4154,23 @@
             // Mais força no método que vem dando os melhores resultados: reparo direcionado Reefer
             // a partir da elite/melhor tentativa. Os modos antigos continuam entrando para diversidade.
             if (hasElite && (mode === 0 || mode === 3 || mode === 6 || mode === 9 || mode === 12 || mode === 15 || mode === 18 || mode === 21)) return runForcedReeferEliteRepairAutoAttempt(attemptIndex, elitePool, bestResult);
+            if (hasElite && (mode === 2 || mode === 10 || mode === 20)) return runMicroReeferEliteRepairAutoAttempt(attemptIndex, elitePool, bestResult);
             if (hasElite && (mode === 5 || mode === 11 || mode === 17 || mode === 23)) return runDirectedRepairAutoAttempt(attemptIndex, elitePool, bestResult);
             if (mode === 1 || mode === 8 || mode === 16) return runHoldFirstAutoAttempt(attemptIndex);
-            if (mode === 2 || mode === 10 || mode === 20) return runReeferFirstAutoAttempt(attemptIndex);
+            if (mode === 14) return runReeferFirstAutoAttempt(attemptIndex);
             if (mode === 4 || mode === 14) return runStackAutoAttempt(attemptIndex);
             if (mode === 7 || mode === 19) return runReservedAutoAttempt(attemptIndex);
             if (mode === 13 || mode === 22) return runTwentyGapFocusedAutoAttempt(attemptIndex);
             return runSingleAutoAttempt(attemptIndex);
         }
 
-        function shouldEnterAutoElitePool(result, elitePool, limit = 10) {
+        function shouldEnterAutoElitePool(result, elitePool, limit = 18) {
             if (!result) return false;
             if (!elitePool || elitePool.length < limit) return true;
             return isBetterAutoResult(result, elitePool[elitePool.length - 1]);
         }
 
-        function addAutoEliteResult(elitePool, result, limit = 10) {
+        function addAutoEliteResult(elitePool, result, limit = 18) {
             if (!result || !result.savedShip) return elitePool;
             elitePool.push(result);
             elitePool.sort((a, b) => isBetterAutoResult(a, b) ? -1 : (isBetterAutoResult(b, a) ? 1 : 0));
@@ -4150,6 +4316,7 @@ Continuar?`)) return;
             autoRuntime.signatureCounts = {};
             autoRuntime.duplicateAttempts = 0;
             autoRuntime.rerolledAttempts = 0;
+            autoRuntime.lastMileFillPlaced = 0;
             autoRuntime.maxRemovalBudget = removalBudget;
             autoRuntime.currentRemovalBudget = 0;
             autoRuntime.currentRemovalUsed = 0;
@@ -4307,14 +4474,15 @@ Continuar?`)) return;
 
         function placeContainer(bayId, rStr, cStr, showAlert = true) {
             let coord = `${rStr}-${cStr}`;
-            if (shipTopology[bayId][coord]) return; 
+            if (shipTopology[bayId][coord]) { if (showAlert) alert('Não dá para colocar aqui: esta célula não existe no casco/formato da bay.'); return; } 
 
             // Check se alguma versão gêmea deste slot já está ocupada
             let twinsB1 = getTwinBays(bayId);
-            for(let t of twinsB1) { if(savedShip[t][coord]) return; }
+            for(let t of twinsB1) { if(savedShip[t][coord]) { if (showAlert) alert('Não dá para colocar aqui: esta posição física já está ocupada. Toque na célula ocupada para remover primeiro.'); return; } }
 
             if (activeInvId !== null) {
                 let inv = globalInventory.find(i => i.id === activeInvId);
+                if (!inv) { if (showAlert) alert('Carga selecionada não encontrada. Selecione novamente na lista lateral.'); return; }
                 let remaining = inv.qty - inv.placed;
 
                 if (remaining > 0) {
@@ -4323,17 +4491,21 @@ Continuar?`)) return;
 
                     if (inv.size === '40' || inv.size === '45') {
                         let sibling = getSiblingBay(bayId);
-                        if (!sibling) return;
+                        if (!sibling) { if (showAlert) alert('Não dá para colocar 40/45 aqui: não há bay pareada física para ocupar.'); return; }
 
                         let twinsB2 = getTwinBays(sibling);
-                        for(let t of twinsB2) { if (shipTopology[t][coord] || savedShip[t][coord]) return; }
+                        for(let t of twinsB2) { if (shipTopology[t][coord] || savedShip[t][coord]) { if (showAlert) alert('Não dá para colocar 40/45 aqui: a bay física pareada está ocupada ou não existe nesta posição.'); return; } }
 
                         twinsB2.forEach(t => savedShip[t][coord] = { base: 'blocked40' });
                     }
 
                     twinsB1.forEach(t => savedShip[t][coord] = { invId: inv.id });
-                    inv.placed++; 
+                    inv.placed++;
+                } else if (showAlert) {
+                    alert('Essa carga já está completa. Escolha uma carga pendente na lista lateral.');
                 }
+            } else if (showAlert) {
+                alert('Selecione uma carga pendente na lista lateral antes de tocar na bay.');
             }
         }
 
