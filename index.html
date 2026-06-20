@@ -2488,7 +2488,11 @@
                 lines.push(`Uso do porão no melhor plano: ${holdUse.totalHold} contêiner(es) no porão; ${holdUse.reeferHold} reefer(s) no porão; ${holdUse.latePodHold} com destino tardio no porão.`);
                 const reefAudit = analyzeAutoEmptyReeferFootprints(bestResult && bestResult.savedShip ? bestResult.savedShip : null);
                 lines.push(`Auditoria reefer 40': espaços vazios estruturais — porão ${reefAudit.emptyHold40} (${reefAudit.supportedHold40} já com apoio), convés ${reefAudit.emptyDeck40} (${reefAudit.supportedDeck40} já com apoio).`);
-                lines.push('Nesta versão, os reefers são resolvidos primeiro como subproblema próprio: porão por coluna com apoio em degrau de casco e espinha dorsal POL cedo/POD tardio, depois convés, sem remoções.');
+                if (autoRuntime.lastReeferColumnAudit) {
+                    const ca = autoRuntime.lastReeferColumnAudit;
+                    lines.push(`Solver reefer: ${ca.holdPlaced || 0} no porão, ${ca.deckPlaced || 0} no convés; colunas homogêneas usadas ${ca.samePodColumns || 0}, reefers nessas colunas ${ca.samePodPlaced || 0}.`);
+                }
+                lines.push('Nesta versão, os reefers são resolvidos primeiro como subproblema próprio: porão por coluna, colunas homogêneas por POD e preenchimento manual preservado; depois convés, sem remoções.');
             } catch(e) {
                 lines.push('Não foi possível calcular a capacidade teórica nesta execução.');
             }
@@ -2893,6 +2897,165 @@
             return { placed, score };
         }
 
+
+        function snapshotAutoSolverState() {
+            return {
+                savedShip: clonePlainObject(savedShip),
+                placedCounts: snapshotAutoPlacedCounts()
+            };
+        }
+
+        function restoreAutoSolverState(snapshot) {
+            if (!snapshot) return;
+            savedShip = clonePlainObject(snapshot.savedShip || {});
+            restoreAutoPlacedCounts(snapshot.placedCounts || {});
+        }
+
+        function getAutoReeferPodGroupOrder(section, attemptIndex, rng) {
+            const base = section === 'hold'
+                ? ['TR', 'VE', 'NA', 'BA', 'LH', 'LB']
+                : ['LB', 'LH', 'BA', 'NA', 'VE', 'TR'];
+            const variants = [
+                base,
+                section === 'hold' ? ['VE', 'TR', 'NA', 'BA', 'LH', 'LB'] : ['LH', 'LB', 'BA', 'NA', 'VE', 'TR'],
+                section === 'hold' ? ['NA', 'VE', 'TR', 'BA', 'LH', 'LB'] : ['BA', 'LH', 'LB', 'NA', 'VE', 'TR']
+            ];
+            const picked = variants[attemptIndex % variants.length].slice();
+            if (attemptIndex % 5 === 0) {
+                picked.sort((a, b) => (rng() - 0.5));
+            }
+            return picked;
+        }
+
+        function getReeferPoolUnitsByPod(pool, pod) {
+            return pool
+                .map((inv, idx) => ({ inv, idx }))
+                .filter(x => x.inv && x.inv.pod === pod)
+                .sort((a, b) => {
+                    const ap = getOrderIndex(POL_ORDER, a.inv.pol);
+                    const bp = getOrderIndex(POL_ORDER, b.inv.pol);
+                    return ap - bp;
+                });
+        }
+
+        function simulateReeferSamePodLaneFill(pool, lane, pod, attemptIndex, rng, commit = false, audit = null) {
+            const snapshot = snapshotAutoSolverState();
+            const units = getReeferPoolUnitsByPod(pool, pod);
+            const usedPoolIndexes = [];
+            let placed = 0;
+            let score = 0;
+            let cursor = 0;
+
+            for (let r = 0; r < lane.rows.length && cursor < units.length; r++) {
+                const row = lane.rows[r];
+                let picked = null;
+
+                for (let u = cursor; u < units.length; u++) {
+                    const candidate = units[u];
+                    const validation = validateAutoPlacement(candidate.inv, lane.bayId, row, lane.col);
+                    if (!validation.ok) {
+                        if (audit && validation.reason) incrementAutoCount(audit.reasons, validation.reason);
+                        continue;
+                    }
+                    picked = candidate;
+                    cursor = u + 1;
+                    break;
+                }
+
+                if (!picked) break;
+
+                commitAutoPlacement(picked.inv, lane.bayId, row, lane.col, 0);
+                usedPoolIndexes.push(picked.idx);
+                placed++;
+                const level = getVerticalLevelFromBottom(lane.bayId, row);
+                const polIdx = getOrderIndex(POL_ORDER, picked.inv.pol);
+                const podIdx = getOrderIndex(POD_ORDER, picked.inv.pod);
+                let slotScore = getAutoReeferExactSlotScore(picked.inv, lane.bayId, row, lane.col, lane.section, attemptIndex, rng);
+                slotScore -= placed * 38000; // encher a coluna vale mais que otimizar uma célula isolada
+                slotScore -= lane.rows.length * 2500;
+                if (lane.section === 'hold') slotScore -= 18000;
+                if (lane.section === 'hold' && level <= 1) slotScore -= 6000;
+                if (podIdx >= 3) slotScore -= 5000; // destino tardio vira base natural
+                if (polIdx <= 2) slotScore -= 2200; // carregou cedo: bom para ficar baixo
+                score += slotScore;
+            }
+
+            if (!commit) restoreAutoSolverState(snapshot);
+            else {
+                usedPoolIndexes.sort((a, b) => b - a).forEach(idx => pool.splice(idx, 1));
+                if (audit) {
+                    audit.samePodColumns = (audit.samePodColumns || 0) + (placed > 0 ? 1 : 0);
+                    audit.samePodPlaced = (audit.samePodPlaced || 0) + placed;
+                    if (lane.section === 'hold') audit.holdPlaced += placed;
+                    else audit.deckPlaced += placed;
+                }
+            }
+
+            return { placed, score, usedPoolIndexes };
+        }
+
+        function fillAutoReeferSamePodColumns(pool, section, attemptIndex, rng, audit = null, options = {}) {
+            let placed = 0;
+            let score = 0;
+            const lanes = buildAutoReeferColumnLanes(section, attemptIndex, rng);
+            const podOrder = getAutoReeferPodGroupOrder(section, attemptIndex, rng);
+            const minFill = options.minFill || (section === 'hold' ? 2 : 2);
+            if (audit) audit.samePodLanesTried = (audit.samePodLanesTried || 0) + lanes.length;
+
+            lanes.forEach(lane => {
+                if (!pool.length) return;
+                let bestPod = null;
+                let bestResult = null;
+                let bestValue = Infinity;
+
+                podOrder.forEach(pod => {
+                    const count = pool.filter(inv => inv && inv.pod === pod).length;
+                    if (!count) return;
+                    const trial = simulateReeferSamePodLaneFill(pool, lane, pod, attemptIndex, rng, false, audit);
+                    if (trial.placed < minFill) return;
+                    const podIdx = getOrderIndex(POD_ORDER, pod);
+                    let value = trial.score - trial.placed * 90000;
+                    if (section === 'hold' && podIdx >= 3) value -= 30000;
+                    if (section === 'hold' && pod === 'BA') value -= 12000;
+                    if (section === 'hold' && (pod === 'LH' || pod === 'LB') && trial.placed >= 3) value -= 8000;
+                    if (trial.placed === lane.rows.length) value -= 50000;
+                    value += (rng() - 0.5) * 500;
+                    if (value < bestValue) {
+                        bestValue = value;
+                        bestPod = pod;
+                        bestResult = trial;
+                    }
+                });
+
+                if (!bestPod || !bestResult) return;
+                const committed = simulateReeferSamePodLaneFill(pool, lane, bestPod, attemptIndex, rng, true, audit);
+                placed += committed.placed;
+                score += committed.score - committed.placed * 120000;
+            });
+
+            return { placed, score };
+        }
+
+        function tryFillRemainingReeferEmptyColumns(pool, attemptIndex, rng, audit = null) {
+            // Última milha: depois dos métodos normais, procure colunas/trechos ainda vazios
+            // e tente preenchê-los com grupos homogêneos de POD. Isso ataca exatamente os
+            // espaços visuais vazios nas bays reefer, inclusive porão, sem relaxar POL/POD.
+            let placed = 0;
+            let score = 0;
+            const passes = [
+                { section: 'hold', minFill: 1 },
+                { section: 'deck', minFill: 1 },
+                { section: 'hold', minFill: 1 }
+            ];
+            passes.forEach(pass => {
+                if (!pool.length) return;
+                const res = fillAutoReeferSamePodColumns(pool, pass.section, attemptIndex + placed + 17, rng, audit, { minFill: pass.minFill });
+                placed += res.placed;
+                score += res.score;
+            });
+            return { placed, score };
+        }
+
         function finishAutoReeferPoolByCandidates(pool, attemptIndex, rng, audit = null) {
             let placed = 0;
             let score = 0;
@@ -3166,6 +3329,12 @@
             const audit = { lanesTried: 0, holdPlaced: 0, deckPlaced: 0, reasons: {} };
             const pool = buildRemainingAutoReeferPool(attemptIndex, rng);
 
+            // Fase 0 — colunas homogêneas no porão: se há espaço vazio, tenta montar pilhas
+            // inteiras de mesmo POD/ordem POL. Isso evita desperdiçar colunas vazias com o solver
+            // célula-a-célula e permite colocar LH/BA/NA/VE em porões quando a coluna toda fica acessível.
+            const holdSamePod = fillAutoReeferSamePodColumns(pool, 'hold', attemptIndex, rng, audit, { minFill: 2 });
+            placementScore += holdSamePod.score - holdSamePod.placed * 19000;
+
             // Fase 1 — REEFER ONLY / PORÃO FIRST REAL:
             // monta colunas físicas de 40' no porão, de baixo para cima, antes de qualquer convés.
             // A prioridade agora é formar "espinha dorsal": POL cedo + POD tardio na base,
@@ -3173,18 +3342,34 @@
             const hold = fillAutoReeferColumnsFromPool(pool, 'hold', attemptIndex, rng, audit);
             placementScore += hold.score - hold.placed * 14000;
 
-            // Fase 2 — só depois usa o convés, também por coluna/base para evitar buracos.
+            // Fase 2 — tenta novamente colunas homogêneas no porão para aproveitar espaços que
+            // sobraram entre colunas completas/incompletas.
+            const holdLast = fillAutoReeferSamePodColumns(pool, 'hold', attemptIndex + 7, rng, audit, { minFill: 1 });
+            placementScore += holdLast.score - holdLast.placed * 16000;
+
+            // Fase 3 — só depois usa o convés, também por coluna/base para evitar buracos.
+            const deckSamePod = fillAutoReeferSamePodColumns(pool, 'deck', attemptIndex, rng, audit, { minFill: 2 });
+            placementScore += deckSamePod.score - deckSamePod.placed * 9000;
+
             const deck = fillAutoReeferColumnsFromPool(pool, 'deck', attemptIndex, rng, audit);
             placementScore += deck.score - deck.placed * 2600;
 
-            // Fase 3 — arremate por candidatos tradicionais para aproveitar eventuais gaps que sobraram.
+            // Fase 4 — arremate por candidatos tradicionais para aproveitar eventuais gaps que sobraram.
             const rest = finishAutoReeferPoolByCandidates(pool, attemptIndex, rng, audit);
             placementScore += rest.score - rest.placed * 900;
+
+            // Fase 5 — última milha: procura colunas e trechos ainda livres e força enchimento
+            // por mesmo POD, inclusive com destinos cedo, desde que a coluna fique válida.
+            const lastGap = tryFillRemainingReeferEmptyColumns(pool, attemptIndex, rng, audit);
+            placementScore += lastGap.score - lastGap.placed * 12000;
 
             autoRuntime.lastReeferColumnAudit = {
                 holdPlaced: audit.holdPlaced,
                 deckPlaced: audit.deckPlaced,
                 lanesTried: audit.lanesTried,
+                samePodColumns: audit.samePodColumns || 0,
+                samePodPlaced: audit.samePodPlaced || 0,
+                samePodLanesTried: audit.samePodLanesTried || 0,
                 reasons: clonePlainObject(audit.reasons || {}),
                 remaining: pool.length
             };
