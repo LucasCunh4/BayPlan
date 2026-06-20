@@ -576,7 +576,7 @@
                             <div id="autoBackgroundStatus" class="auto-bg-status">Enquanto a aba continuar aberta, a busca segue em segundo plano. Se fechar o navegador, ela para.</div>
                         </div>
                     </div>
-                    <button class="btn-auto-stow" id="btnAutoStow">🧠 Estivar Automaticamente</button>
+                    <button class="btn-auto-stow" id="btnAutoStow" type="button" onclick="event.stopImmediatePropagation(); safeRunAutoStowageFromButton(); return false;">🧠 Estivar Automaticamente</button>
                     <div id="autoProgressWrap" class="auto-progress-wrap">
                         <div class="auto-progress-track"><div id="autoProgressBar" class="auto-progress-bar"></div></div>
                         <div id="autoProgressText" class="auto-progress-text">Aguardando início...</div>
@@ -1270,7 +1270,15 @@
             document.getElementById('btnFilterIMO').addEventListener('click', function() { this.classList.toggle('active'); document.getElementById('canvasArea').classList.toggle('filter-imo'); });
             document.getElementById('btnFilterReefer').addEventListener('click', function() { this.classList.toggle('active'); document.getElementById('canvasArea').classList.toggle('filter-reefer'); });
             document.getElementById('exportPdfBtn').addEventListener('click', generateRealPdf);
-            document.getElementById('btnAutoStow').addEventListener('click', runAutoStowage);
+            
+            const autoBtnSafe = document.getElementById('btnAutoStow');
+            if (autoBtnSafe) {
+                autoBtnSafe.addEventListener('click', (ev) => {
+                    ev.preventDefault();
+                    ev.stopImmediatePropagation();
+                    safeRunAutoStowageFromButton();
+                });
+            }
 
             setupGridEditControls(); setupJsonExportImport(); syncInventoryFromTable();
             
@@ -4433,6 +4441,34 @@ Continuar?`)) return;
             }
         }
 
+        function safeRunAutoStowageFromButton() {
+            if (autoStowRunning) return;
+            try {
+                const promise = runAutoStowage();
+                if (promise && typeof promise.catch === 'function') {
+                    promise.catch(err => {
+                        console.error(err);
+                        alert('Erro ao iniciar a estivagem automática: ' + (err && err.message ? err.message : err));
+                    });
+                }
+                return promise;
+            } catch (err) {
+                console.error(err);
+                alert('Erro ao iniciar a estivagem automática: ' + (err && err.message ? err.message : err));
+            }
+        }
+        window.safeRunAutoStowageFromButton = safeRunAutoStowageFromButton;
+        window.runAutoStowage = runAutoStowage;
+
+        document.addEventListener('click', function(ev) {
+            const btn = ev.target && ev.target.closest ? ev.target.closest('#btnAutoStow') : null;
+            if (!btn) return;
+            ev.preventDefault();
+            ev.stopImmediatePropagation();
+            safeRunAutoStowageFromButton();
+        }, true);
+
+
         // --- EXPORTAR PDF ---
         async function generateRealPdf() {
             const loadingOverlay = document.getElementById('pdfLoadingOverlay'); const printArea = document.getElementById('printArea'); const mainEl = document.querySelector('main'); const headerEl = document.querySelector('header');
@@ -4587,7 +4623,12 @@ Continuar?`)) return;
             };
         }
 
-        initApp();
+        try {
+            initApp();
+        } catch (err) {
+            console.error('Erro na inicialização do app:', err);
+            alert('Erro na inicialização do app: ' + (err && err.message ? err.message : err));
+        }
     </script>
 </body>
 </html>
