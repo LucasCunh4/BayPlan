@@ -237,6 +237,14 @@
         .manual-pick-actions { display: flex; gap: 6px; margin-top: 7px; }
         .manual-pick-actions button { flex: 1; padding: 6px 8px; border-radius: 4px; border: 1px solid #cdbb73; background: #fff; color: #4f4215; font-weight: bold; cursor: pointer; font-size: 10px; }
         .manual-pick-actions button:hover { background: #fff7d6; }
+
+        .auto-option-switch-panel { display: none; margin-top: 10px; padding: 9px; background: #f6f2ff; border: 1px solid #cdbef6; border-radius: 6px; font-size: 11px; color: #35235f; }
+        .auto-option-switch-panel h3 { margin: 0 0 7px 0; font-size: 12px; color: #35235f; text-transform: uppercase; }
+        .auto-option-switch-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 7px; }
+        .auto-option-switch-actions button { padding: 7px 8px; border-radius: 4px; border: 1px solid #9f8add; background: #fff; color: #35235f; font-weight: bold; cursor: pointer; font-size: 10px; }
+        .auto-option-switch-actions button:hover:not(:disabled) { background: #eee7ff; }
+        .auto-option-switch-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
+        .auto-option-switch-status { margin-top: 6px; line-height: 1.25; color: #4a3b74; user-select: text; }
         .manual-mode-selected { outline: 3px solid #f39c12 !important; outline-offset: 2px; }
 
         /* PAINEL DE EXPANSÃO DA GRADE */
@@ -678,6 +686,16 @@
                         <div id="autoProgressText" class="auto-progress-text">Aguardando início...</div>
                     </div>
                     <div id="autoStowReport" class="auto-stow-report"></div>
+
+
+                    <div id="autoOptionSwitchPanel" class="auto-option-switch-panel">
+                        <h3>⭐ Planos de melhor pontuação</h3>
+                        <div class="auto-option-switch-actions">
+                            <button id="btnApplyAutoOption1" type="button">Usar opção 1</button>
+                            <button id="btnApplyAutoOption2" type="button">Usar opção 2</button>
+                        </div>
+                        <div id="autoOptionSwitchStatus" class="auto-option-switch-status">Rode a estivagem automática para salvar duas opções diferentes com a melhor pontuação.</div>
+                    </div>
 
                     <div id="manualPickPanel" class="manual-pick-panel">
                         <h3>✋ Inserção manual</h3>
@@ -1389,6 +1407,10 @@
             if (manualDeselectBtn) manualDeselectBtn.addEventListener('click', () => { activeInvId = null; renderInventoryPalette(); renderManualPickSelect(); });
             const manualRefreshBtn = document.getElementById('btnManualShowPending');
             if (manualRefreshBtn) manualRefreshBtn.addEventListener('click', () => { recalculateInventory(); renderInventoryPalette(); renderManualPickSelect(); });
+            const autoOpt1Btn = document.getElementById('btnApplyAutoOption1');
+            if (autoOpt1Btn) autoOpt1Btn.addEventListener('click', () => applyAutoSavedPlanOption(0));
+            const autoOpt2Btn = document.getElementById('btnApplyAutoOption2');
+            if (autoOpt2Btn) autoOpt2Btn.addEventListener('click', () => applyAutoSavedPlanOption(1));
             document.getElementById('toggleEditBtn').addEventListener('click', function() { currentState.editMode = !currentState.editMode; this.classList.toggle('active'); document.getElementById('canvasArea').classList.toggle('edit-mode-active'); document.getElementById('gridEditPanel').style.display = currentState.editMode ? 'block' : 'none'; lastClickedCell = null; renderBayPairsUI(); });
             document.getElementById('btnFilterIMO').addEventListener('click', function() { this.classList.toggle('active'); document.getElementById('canvasArea').classList.toggle('filter-imo'); });
             document.getElementById('btnFilterReefer').addEventListener('click', function() { this.classList.toggle('active'); document.getElementById('canvasArea').classList.toggle('filter-reefer'); });
@@ -1404,6 +1426,8 @@
             }
 
             setupGridEditControls(); setupJsonExportImport(); syncInventoryFromTable();
+            loadAutoSavedPlanOptions();
+            updateAutoOptionSwitchUi();
             
             // Guia inicial removido: não exibe modal ao abrir o app.
         }
@@ -2286,7 +2310,9 @@
             modeStats: null,
             maxRemovalBudget: 12,
             currentRemovalBudget: 0,
-            currentRemovalUsed: 0
+            currentRemovalUsed: 0,
+            savedPlanOptions: [],
+            currentSavedOptionIndex: 0
         };
 
         function rebuildAutoRuntimeIndexes() {
@@ -2545,6 +2571,155 @@
             if (saveNow) persistData();
             return true;
         }
+
+
+        const AUTO_SAVED_OPTIONS_KEY = 'stowagePlanAutoSavedOptionsV2';
+
+        function cloneAutoResultForSavedOption(result, label) {
+            if (!result || !result.savedShip) return null;
+            return {
+                label: label || '',
+                savedShip: clonePlainObject(result.savedShip),
+                placed: parseInt(result.placed, 10) || 0,
+                total: parseInt(result.total, 10) || getAutoTotalCargo(),
+                specialPlaced: parseInt(result.specialPlaced, 10) || 0,
+                placementScore: Number(result.placementScore || 0),
+                mode: result.mode || '',
+                signature: result.signature || getAutoPlanSignature(result.savedShip),
+                createdAt: new Date().toISOString()
+            };
+        }
+
+        function getAutoPlanKeySet(snapshot) {
+            const source = snapshot || savedShip;
+            const set = new Set();
+            const physicalBays = BASE_BAY_PAIRS.flat();
+            physicalBays.forEach(bayId => {
+                const grid = bayGrids[bayId];
+                if (!grid) return;
+                const rows = [...grid.rowsAbove, ...grid.rowsBelow];
+                rows.forEach(row => {
+                    grid.cols.forEach(col => {
+                        const coord = `${row}-${col}`;
+                        for (let t of getTwinBays(bayId)) {
+                            const cell = source[t] && source[t][coord];
+                            if (!cell) continue;
+                            if (cell.invId !== undefined) {
+                                set.add(`${bayId}:${coord}:I${cell.invId}`);
+                                break;
+                            }
+                            if (cell.base) {
+                                set.add(`${bayId}:${coord}:B${cell.base}`);
+                                break;
+                            }
+                        }
+                    });
+                });
+            });
+            return set;
+        }
+
+        function getAutoPlanDistance(snapshotA, snapshotB) {
+            if (!snapshotA || !snapshotB) return 0;
+            const a = getAutoPlanKeySet(snapshotA);
+            const b = getAutoPlanKeySet(snapshotB);
+            let diff = 0;
+            a.forEach(k => { if (!b.has(k)) diff++; });
+            b.forEach(k => { if (!a.has(k)) diff++; });
+            return diff;
+        }
+
+        function findAutoAlternativeBestResult(bestResult, elitePool) {
+            if (!bestResult || !bestResult.savedShip || !elitePool || !elitePool.length) return null;
+            const bestSig = bestResult.signature || getAutoPlanSignature(bestResult.savedShip);
+            const bestPlaced = parseInt(bestResult.placed, 10) || 0;
+            let candidates = elitePool.filter(r => {
+                if (!r || !r.savedShip) return false;
+                const rSig = r.signature || getAutoPlanSignature(r.savedShip);
+                return rSig !== bestSig && (parseInt(r.placed, 10) || 0) === bestPlaced;
+            });
+            if (!candidates.length) return null;
+            candidates = candidates.map(r => ({
+                result: r,
+                distance: getAutoPlanDistance(bestResult.savedShip, r.savedShip),
+                score: Number(r.placementScore || 0),
+                special: parseInt(r.specialPlaced, 10) || 0
+            })).sort((a, b) => {
+                if (b.distance !== a.distance) return b.distance - a.distance;
+                if (b.special !== a.special) return b.special - a.special;
+                return a.score - b.score;
+            });
+            return candidates[0].result;
+        }
+
+        function saveAutoBestPlanOptions(bestResult, elitePool) {
+            const alternative = findAutoAlternativeBestResult(bestResult, elitePool);
+            const option1 = cloneAutoResultForSavedOption(bestResult, 'Opção 1');
+            const option2 = cloneAutoResultForSavedOption(alternative, 'Opção 2');
+            autoRuntime.savedPlanOptions = [option1, option2].filter(Boolean);
+            autoRuntime.currentSavedOptionIndex = 0;
+            try {
+                localStorage.setItem(AUTO_SAVED_OPTIONS_KEY, JSON.stringify({ version: 2, options: autoRuntime.savedPlanOptions }));
+            } catch (err) {
+                console.warn('Não foi possível salvar as opções automáticas:', err);
+            }
+            updateAutoOptionSwitchUi();
+            return autoRuntime.savedPlanOptions;
+        }
+
+        function loadAutoSavedPlanOptions() {
+            try {
+                const raw = localStorage.getItem(AUTO_SAVED_OPTIONS_KEY);
+                if (!raw) { autoRuntime.savedPlanOptions = []; return []; }
+                const parsed = JSON.parse(raw);
+                const options = Array.isArray(parsed && parsed.options) ? parsed.options.filter(o => o && o.savedShip) : [];
+                autoRuntime.savedPlanOptions = options;
+                autoRuntime.currentSavedOptionIndex = 0;
+                return options;
+            } catch (err) {
+                autoRuntime.savedPlanOptions = [];
+                return [];
+            }
+        }
+
+        function getAutoSavedOptionSummary(opt, fallbackLabel) {
+            if (!opt) return `${fallbackLabel}: indisponível`;
+            const total = opt.total || getAutoTotalCargo();
+            const mode = opt.mode ? ` — ${opt.mode}` : '';
+            return `${opt.label || fallbackLabel}: ${opt.placed || 0}/${total}${mode}`;
+        }
+
+        function updateAutoOptionSwitchUi() {
+            const panel = document.getElementById('autoOptionSwitchPanel');
+            const status = document.getElementById('autoOptionSwitchStatus');
+            const btn1 = document.getElementById('btnApplyAutoOption1');
+            const btn2 = document.getElementById('btnApplyAutoOption2');
+            if (!panel || !status) return;
+            const opts = autoRuntime.savedPlanOptions || [];
+            panel.style.display = opts.length ? 'block' : 'none';
+            if (btn1) btn1.disabled = !opts[0];
+            if (btn2) btn2.disabled = !opts[1];
+            const current = autoRuntime.currentSavedOptionIndex || 0;
+            status.innerHTML = `${escapeAutoHtml(getAutoSavedOptionSummary(opts[0], 'Opção 1'))}<br>${escapeAutoHtml(getAutoSavedOptionSummary(opts[1], 'Opção 2'))}<br>Ativa agora: opção ${current + 1}.`;
+        }
+
+        function applyAutoSavedPlanOption(index) {
+            const opts = autoRuntime.savedPlanOptions && autoRuntime.savedPlanOptions.length ? autoRuntime.savedPlanOptions : loadAutoSavedPlanOptions();
+            const opt = opts[index];
+            if (!opt || !opt.savedShip) {
+                alert(index === 1 ? 'Ainda não existe uma segunda opção diferente com a mesma melhor pontuação.' : 'Ainda não existe uma opção salva.');
+                return false;
+            }
+            const applied = applyBestAutoResultToState(opt, true, true);
+            if (applied) {
+                autoRuntime.currentSavedOptionIndex = index;
+                renderManualPickSelect();
+                updateAutoOptionSwitchUi();
+            }
+            return applied;
+        }
+
+        window.applyAutoSavedPlanOption = applyAutoSavedPlanOption;
 
         function incrementAutoCount(obj, key, amount = 1) {
             const safeKey = key || 'motivo não identificado';
@@ -4630,8 +4805,15 @@ Continuar?`)) return;
                 }
 
                 const placed = best ? best.placed : 0;
+                if (best && best.savedShip) saveAutoBestPlanOptions(best, elitePool);
                 if (!stopReason) stopReason = executedAttempts >= attempts ? 'limite de tentativas atingido' : 'busca encerrada';
                 const report = buildAutoDifficultyReport(best, totalCargo, executedAttempts, attempts, stopReason);
+                const savedOptions = autoRuntime.savedPlanOptions || [];
+                if (savedOptions[1]) {
+                    report.push(`Opções salvas: opção 1 e opção 2 chegaram à mesma melhor pontuação (${savedOptions[0].placed || placed}/${totalCargo}) e são planos diferentes.`);
+                } else if (savedOptions[0]) {
+                    report.push('Opções salvas: só uma opção atingiu a melhor pontuação nesta busca. A segunda aparecerá quando outra tentativa diferente empatar com ela.');
+                }
 
                 setAutoProgress(executedAttempts, attempts, placed, totalCargo, placed >= totalCargo ? 'Plano completo encontrado.' : 'Busca encerrada com diagnóstico do melhor plano.');
                 setAutoReport(report, false);
