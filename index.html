@@ -561,7 +561,7 @@
                                 <input type="number" id="autoUiInterval" min="1" max="500" step="5" value="25">
                             </label>
                         </div>
-                        <div class="auto-stow-hint">0 s = sem limite de tempo. Combina reefer porão-first com correção de apoio em degrau, espinha dorsal POL cedo/POD tardio, proteção bay 33, pilha por pilha, contêiner por contêiner e reparo elite. A regra de POD voltou a ser rígida; a tela só atualiza de tempos em tempos para ganhar velocidade.</div>
+                        <div class="auto-stow-hint">0 s = sem limite de tempo. Combina reefer porão-first, reparo direcionado Reefer elite, deduplicação de tentativas, correção de apoio em degrau, espinha dorsal POL cedo/POD tardio, proteção bay 33, pilha por pilha, contêiner por contêiner e modo manual preservado. A regra de POD voltou a ser rígida; a tela só atualiza de tempos em tempos para ganhar velocidade.</div>
                         <div class="auto-bg-row">
                             <label><input type="checkbox" id="autoBackgroundMode" checked> Continuar rodando ao sair da aba/tela</label>
                             <div id="autoBackgroundStatus" class="auto-bg-status">Enquanto a aba continuar aberta, a busca segue em segundo plano. Se fechar o navegador, ela para.</div>
@@ -2476,6 +2476,9 @@
                 const modeText = getTopAutoCounts(autoRuntime.modeStats, 8).map(([k, v]) => `${k} (${v})`).join(', ');
                 if (modeText) lines.push(`Modos testados: ${modeText}.`);
             }
+            if (autoRuntime.duplicateAttempts) {
+                lines.push(`Tentativas repetidas evitadas/re-sorteadas: ${autoRuntime.duplicateAttempts} (rerolls totais: ${autoRuntime.rerolledAttempts || 0}).`);
+            }
             if (bestResult) {
             }
             lines.push('');
@@ -2488,11 +2491,7 @@
                 lines.push(`Uso do porão no melhor plano: ${holdUse.totalHold} contêiner(es) no porão; ${holdUse.reeferHold} reefer(s) no porão; ${holdUse.latePodHold} com destino tardio no porão.`);
                 const reefAudit = analyzeAutoEmptyReeferFootprints(bestResult && bestResult.savedShip ? bestResult.savedShip : null);
                 lines.push(`Auditoria reefer 40': espaços vazios estruturais — porão ${reefAudit.emptyHold40} (${reefAudit.supportedHold40} já com apoio), convés ${reefAudit.emptyDeck40} (${reefAudit.supportedDeck40} já com apoio).`);
-                if (autoRuntime.lastReeferColumnAudit) {
-                    const ca = autoRuntime.lastReeferColumnAudit;
-                    lines.push(`Solver reefer: ${ca.holdPlaced || 0} no porão, ${ca.deckPlaced || 0} no convés; colunas homogêneas usadas ${ca.samePodColumns || 0}, reefers nessas colunas ${ca.samePodPlaced || 0}.`);
-                }
-                lines.push('Nesta versão, os reefers são resolvidos primeiro como subproblema próprio: porão por coluna, colunas homogêneas por POD e preenchimento manual preservado; depois convés, sem remoções.');
+                lines.push('Nesta versão, os reefers continuam porão-first, mas a busca usa mais reparo direcionado Reefer elite, evita repetir planos iguais e mantém o modo manual por pointer/click após a automática.');
             } catch(e) {
                 lines.push('Não foi possível calcular a capacidade teórica nesta execução.');
             }
@@ -3811,13 +3810,17 @@
             return { category, reason };
         }
 
-        function chooseAutoEliteSeed(elitePool, rng) {
+        function chooseAutoEliteSeed(elitePool, rng, preferBest = false) {
             if (!elitePool || !elitePool.length) return null;
-            const limit = Math.min(elitePool.length, 6);
+            const limit = Math.min(elitePool.length, preferBest ? 10 : 8);
+            // Quando já existe um plano muito bom, usa ele como base com frequência,
+            // mas ainda preserva diversidade para não ficar preso no mesmo arranjo.
+            if (preferBest && rng() < 0.52) return elitePool[0];
             let total = 0;
             const weights = [];
             for (let i = 0; i < limit; i++) {
-                const w = 1 / (i + 1);
+                const qualityGap = Math.max(0, (elitePool[0].placed || 0) - (elitePool[i].placed || 0));
+                const w = (preferBest ? 4.5 : 2.0) / ((i + 1) * (1 + qualityGap * 0.12));
                 weights.push(w); total += w;
             }
             let pick = rng() * total;
@@ -3828,8 +3831,8 @@
             return elitePool[0];
         }
 
-        function removeDirectedAutoBlockers(seedResult, attemptIndex, rng) {
-            const profile = getDominantAutoFailureProfile(seedResult ? seedResult.failures : []);
+        function removeDirectedAutoBlockers(seedResult, attemptIndex, rng, forcedProfile = null) {
+            const profile = forcedProfile || getDominantAutoFailureProfile(seedResult ? seedResult.failures : []);
             let placements = collectCurrentAutoPlacements();
             const removed = [];
 
@@ -3843,6 +3846,34 @@
                 });
                 const hardKeys = new Set(hardBlockers.map(p => `${p.invId}-${p.bayId}-${p.coord}`));
                 placements = placements.filter(p => !hardKeys.has(`${p.invId}-${p.bayId}-${p.coord}`));
+
+                // Reparo reefer útil quando a melhor tentativa já está muito próxima do ótimo:
+                // além de limpar bloqueadores, desmonta um pequeno conjunto de reefers em colunas
+                // esparsas/topo para permitir reconstrução e encaixe das sobras. É controlado para
+                // não destruir o bom plano-base.
+                const reeferCandidates = placements
+                    .filter(p => isReeferInventory(p.inv) && REEFER_BAYS.includes(p.bayId))
+                    .map(p => {
+                        const podIdx = getOrderIndex(POD_ORDER, p.inv.pod);
+                        let score = 0;
+                        if (p.deck) score -= 900;
+                        score -= p.level * 180;
+                        if (p.inv.pod === 'VE' || p.inv.pod === 'NA' || p.inv.pod === 'BA') score -= 700;
+                        if (p.inv.pod === 'LH' || p.inv.pod === 'LB') score += 450;
+                        score += podIdx * 30;
+                        score += rng() * 1000;
+                        return { ...p, reeferRepairScore: score };
+                    })
+                    .sort((a, b) => a.reeferRepairScore - b.reeferRepairScore);
+                const softRemove = Math.min(reeferCandidates.length, 4 + (attemptIndex % 6) * 2 + (attemptIndex % 17 === 0 ? 10 : 0));
+                for (let i = 0; i < softRemove; i++) {
+                    const p = reeferCandidates[i];
+                    if (!p) continue;
+                    removeAutoPlacement(p);
+                    removed.push(p.inv);
+                }
+                const softKeys = new Set(reeferCandidates.slice(0, softRemove).map(p => `${p.invId}-${p.bayId}-${p.coord}`));
+                placements = placements.filter(p => !softKeys.has(`${p.invId}-${p.bayId}-${p.coord}`));
             }
 
             placements = placements.map(p => {
@@ -3883,7 +3914,7 @@
         function runDirectedRepairAutoAttempt(attemptIndex, elitePool, bestResult) {
             const seed = ((Date.now() & 0xffffffff) ^ Math.imul(attemptIndex + 37, 668265263)) >>> 0;
             const rng = createAutoRng(seed);
-            const seedResult = chooseAutoEliteSeed(elitePool, rng) || bestResult;
+            const seedResult = chooseAutoEliteSeed(elitePool, rng, true) || bestResult;
             if (!seedResult || !seedResult.savedShip) return runReservedAutoAttempt(attemptIndex);
             applyBestAutoResultToState(seedResult, false, false);
             autoRuntime.currentRemovalUsed = estimateAutoRemovalsInCurrentPlan();
@@ -3915,18 +3946,55 @@
             return result;
         }
 
+        function runForcedReeferEliteRepairAutoAttempt(attemptIndex, elitePool, bestResult) {
+            const seed = ((Date.now() & 0xffffffff) ^ Math.imul(attemptIndex + 7919, 1103515245)) >>> 0;
+            const rng = createAutoRng(seed);
+            const seedResult = (bestResult && bestResult.savedShip && (attemptIndex % 3 !== 1))
+                ? bestResult
+                : (chooseAutoEliteSeed(elitePool, rng, true) || bestResult);
+            if (!seedResult || !seedResult.savedShip) return runDirectedRepairAutoAttempt(attemptIndex, elitePool, bestResult);
+
+            applyBestAutoResultToState(seedResult, false, false);
+            const forcedProfile = { category: 'Reefer', reason: 'reparo reefer forçado a partir da elite' };
+            const repairInfo = removeDirectedAutoBlockers(seedResult, attemptIndex, rng, forcedProfile);
+            const priorityIds = new Set();
+            (seedResult.failures || []).map(normalizeAutoFailureRecord).forEach(f => { if (f.invId) priorityIds.add(f.invId); });
+            repairInfo.removed.forEach(inv => { if (inv && inv.id) priorityIds.add(inv.id); });
+
+            let placementScore = (seedResult.placementScore || 0) - 2500;
+            const reefA = placeReefersHoldFirstSelective(attemptIndex + 101, rng, { strict: true });
+            placementScore += reefA.score - reefA.placed * 18000;
+            const reefB = finishAutoReeferPoolByCandidates(buildRemainingAutoReeferPool(attemptIndex + 203, rng), attemptIndex + 203, rng, autoRuntime.lastReeferColumnAudit || {});
+            placementScore += reefB.score - reefB.placed * 9000;
+
+            const units = buildAutoRemainingUnits(attemptIndex + 307, rng, priorityIds);
+            units.forEach(inv => {
+                const protectCritical = !isReeferInventory(inv) && hasRemainingAutoReeferCargo();
+                const chosen = tryPlaceAutoUnit(inv, attemptIndex + 307, rng, { protectCritical });
+                if (chosen) placementScore += chosen.score;
+            });
+            const gap = tryFillAutoSingleBayTwentySlots(attemptIndex + 401, rng, { protectCritical: hasRemainingAutoReeferCargo() });
+            placementScore += gap.score;
+
+            const result = finishAutoAttemptResult(attemptIndex, placementScore, 'reparo direcionado (Reefer elite)');
+            result.repairProfile = forcedProfile;
+            return result;
+        }
+
         function runHybridAutoAttempt(attemptIndex, bestResult, elitePool) {
             resetAutoAttemptRemovalCounters(attemptIndex);
             if (attemptIndex === 0) return runHoldFirstAutoAttempt(attemptIndex);
             const hasElite = elitePool && elitePool.length > 0;
-            const mode = attemptIndex % 18;
-            // Mantém todos os métodos antigos e adiciona o modo porão-first seletivo como uma trilha forte.
-            if (mode === 0 || mode === 4 || mode === 9 || mode === 14) return runHoldFirstAutoAttempt(attemptIndex);
-            if (mode === 2 || mode === 7 || mode === 12 || mode === 16) return runReeferFirstAutoAttempt(attemptIndex);
-            if (hasElite && (mode === 3 || mode === 6 || mode === 10 || mode === 15)) return runDirectedRepairAutoAttempt(attemptIndex, elitePool, bestResult);
-            if (mode === 1 || mode === 8) return runStackAutoAttempt(attemptIndex);
-            if (mode === 5 || mode === 13) return runReservedAutoAttempt(attemptIndex);
-            if (mode === 11) return runTwentyGapFocusedAutoAttempt(attemptIndex);
+            const mode = attemptIndex % 24;
+            // Mais força no método que vem dando os melhores resultados: reparo direcionado Reefer
+            // a partir da elite/melhor tentativa. Os modos antigos continuam entrando para diversidade.
+            if (hasElite && (mode === 0 || mode === 3 || mode === 6 || mode === 9 || mode === 12 || mode === 15 || mode === 18 || mode === 21)) return runForcedReeferEliteRepairAutoAttempt(attemptIndex, elitePool, bestResult);
+            if (hasElite && (mode === 5 || mode === 11 || mode === 17 || mode === 23)) return runDirectedRepairAutoAttempt(attemptIndex, elitePool, bestResult);
+            if (mode === 1 || mode === 8 || mode === 16) return runHoldFirstAutoAttempt(attemptIndex);
+            if (mode === 2 || mode === 10 || mode === 20) return runReeferFirstAutoAttempt(attemptIndex);
+            if (mode === 4 || mode === 14) return runStackAutoAttempt(attemptIndex);
+            if (mode === 7 || mode === 19) return runReservedAutoAttempt(attemptIndex);
+            if (mode === 13 || mode === 22) return runTwentyGapFocusedAutoAttempt(attemptIndex);
             return runSingleAutoAttempt(attemptIndex);
         }
 
@@ -3943,8 +4011,8 @@
             const unique = [];
             const seen = new Set();
             for (let r of elitePool) {
-                const key = `${r.placed}-${r.specialPlaced}-${Math.round(r.placementScore || 0)}-${r.mode || ''}`;
-                if (seen.has(key) && unique.length >= limit) continue;
+                const key = r.signature || getAutoPlanSignature(r.savedShip || null) || `${r.placed}-${r.specialPlaced}-${Math.round(r.placementScore || 0)}-${r.mode || ''}`;
+                if (seen.has(key)) continue;
                 seen.add(key);
                 unique.push(r);
                 if (unique.length >= limit) break;
@@ -3974,7 +4042,53 @@
         function captureAutoResultSnapshot(result) {
             result.savedShip = clonePlainObject(savedShip);
             result.failures = (result.failures || []).map(normalizeAutoFailureRecord);
+            if (!result.signature) result.signature = getAutoPlanSignature(result.savedShip);
             return result;
+        }
+
+        function hashAutoString(str) {
+            let h = 2166136261 >>> 0;
+            for (let i = 0; i < str.length; i++) {
+                h ^= str.charCodeAt(i);
+                h = Math.imul(h, 16777619) >>> 0;
+            }
+            return h.toString(36);
+        }
+
+        function getAutoPlanSignature(snapshot = null) {
+            const source = snapshot || savedShip;
+            const parts = [];
+            const physicalBays = BASE_BAY_PAIRS.flat();
+            physicalBays.forEach(bayId => {
+                const grid = bayGrids[bayId];
+                if (!grid) return;
+                const rows = [...grid.rowsAbove, ...grid.rowsBelow];
+                rows.forEach(row => {
+                    grid.cols.forEach(col => {
+                        const coord = `${row}-${col}`;
+                        let marker = '';
+                        for (let t of getTwinBays(bayId)) {
+                            const cell = source[t] && source[t][coord];
+                            if (!cell) continue;
+                            if (cell.invId !== undefined) { marker = `I${cell.invId}`; break; }
+                            if (cell.base) marker = `B${cell.base}`;
+                        }
+                        if (marker) parts.push(`${bayId}:${coord}:${marker}`);
+                    });
+                });
+            });
+            return hashAutoString(parts.join('|')) + ':' + parts.length;
+        }
+
+        function noteAutoAttemptSignature(result, signature) {
+            if (!autoRuntime.seenPlanSignatures) autoRuntime.seenPlanSignatures = new Set();
+            if (!autoRuntime.signatureCounts) autoRuntime.signatureCounts = {};
+            const sig = signature || getAutoPlanSignature();
+            const existed = autoRuntime.seenPlanSignatures.has(sig);
+            autoRuntime.seenPlanSignatures.add(sig);
+            autoRuntime.signatureCounts[sig] = (autoRuntime.signatureCounts[sig] || 0) + 1;
+            if (result) result.signature = sig;
+            return existed;
         }
 
         function isBetterAutoResult(candidate, currentBest) {
@@ -4032,6 +4146,10 @@ Continuar?`)) return;
             rebuildAutoRuntimeIndexes();
             autoRuntime.startedAt = performance.now();
             autoRuntime.modeStats = {};
+            autoRuntime.seenPlanSignatures = new Set();
+            autoRuntime.signatureCounts = {};
+            autoRuntime.duplicateAttempts = 0;
+            autoRuntime.rerolledAttempts = 0;
             autoRuntime.maxRemovalBudget = removalBudget;
             autoRuntime.currentRemovalBudget = 0;
             autoRuntime.currentRemovalUsed = 0;
@@ -4044,7 +4162,22 @@ Continuar?`)) return;
 
             try {
                 for (let attempt = 0; attempt < attempts; attempt++) {
-                    const result = runHybridAutoAttempt(attempt, best, elitePool);
+                    let result = null;
+                    let planSignature = '';
+                    let wasDuplicate = false;
+                    let rerolls = 0;
+                    const maxRerolls = 5;
+                    for (let rr = 0; rr <= maxRerolls; rr++) {
+                        const attemptKey = attempt + rr * attempts + (rr ? 1000003 : 0);
+                        result = runHybridAutoAttempt(attemptKey, best, elitePool);
+                        planSignature = getAutoPlanSignature();
+                        wasDuplicate = autoRuntime.seenPlanSignatures && autoRuntime.seenPlanSignatures.has(planSignature);
+                        if (!wasDuplicate || rr === maxRerolls) break;
+                        autoRuntime.duplicateAttempts++;
+                        rerolls++;
+                    }
+                    if (rerolls > 0) autoRuntime.rerolledAttempts += rerolls;
+                    noteAutoAttemptSignature(result, planSignature);
                     executedAttempts = attempt + 1;
                     incrementAutoCount(autoRuntime.modeStats, result.mode || 'modo não identificado');
                     const previousBestPlaced = best ? best.placed : 0;
@@ -4052,7 +4185,7 @@ Continuar?`)) return;
 
                     if (improvedBest || shouldEnterAutoElitePool(result, elitePool)) {
                         captureAutoResultSnapshot(result);
-                        elitePool = addAutoEliteResult(elitePool, result);
+                        elitePool = addAutoEliteResult(elitePool, result, 14);
                     }
                     if (improvedBest) best = result;
 
@@ -4069,7 +4202,7 @@ Continuar?`)) return;
                             ? 'Plano completo encontrado. Finalizando...'
                             : improvedBest
                                 ? `Nova melhor tentativa (${result.mode || 'modo híbrido'}): ${best ? best.placed : 0}/${totalCargo}.` + (hiddenBackground ? ' Rodando em segundo plano.' : ' A tela foi atualizada com ela.')
-                                : `Última tentativa descartada (${result.mode || 'modo híbrido'}): ${result.placed}/${totalCargo}. Melhor mantido: ${best ? best.placed : 0}/${totalCargo}.`;
+                                : `Última tentativa descartada (${result.mode || 'modo híbrido'}): ${result.placed}/${totalCargo}. Melhor mantido: ${best ? best.placed : 0}/${totalCargo}.` + (rerolls ? ` Evitou ${rerolls} repetição(ões).` : '');
                         setAutoProgress(attempt + 1, attempts, best ? best.placed : 0, totalCargo, detail);
 
                         if (hiddenBackground) {
@@ -4080,7 +4213,8 @@ Continuar?`)) return;
                                 `Melhor resultado mantido na tela: ${best ? best.placed : 0}/${totalCargo}`,
                                 `Modo da última tentativa: ${result.mode || 'modo híbrido'}`,
                                 improvedBest ? 'Última tentativa virou a nova melhor.' : `Última tentativa foi descartada: ${result.placed}/${totalCargo}`,
-                                previousBestPlaced > 0 ? `Melhor anterior: ${previousBestPlaced}/${totalCargo}` : 'Trava ativa: tentativas piores não substituem o melhor plano.'
+                                previousBestPlaced > 0 ? `Melhor anterior: ${previousBestPlaced}/${totalCargo}` : 'Trava ativa: tentativas piores não substituem o melhor plano.',
+                                `Tentativas repetidas evitadas nesta busca: ${autoRuntime.duplicateAttempts || 0}`
                             ], true);
                         }
                         lastYield = now;
@@ -4203,48 +4337,82 @@ Continuar?`)) return;
             }
         }
 
-        function attachCellListeners() {
-            document.querySelectorAll('.cell').forEach(cell => {
-                cell.addEventListener('mousedown', function(e) {
-                    let rStr = this.getAttribute('data-row'); let cStr = this.getAttribute('data-col'); let bayId = this.getAttribute('data-bay');
-                    let grid = bayGrids[bayId]; let all_rows = [...grid.rowsAbove, ...grid.rowsBelow];
-                    let rIdx = all_rows.indexOf(rStr); let cIdx = grid.cols.indexOf(cStr);
+        function handleManualCellAction(e, cell) {
+            if (!cell) return;
+            if (cell.dataset && cell.dataset.manualHandled === '1') return;
+            if (cell.dataset) {
+                cell.dataset.manualHandled = '1';
+                setTimeout(() => { if (cell.dataset) delete cell.dataset.manualHandled; }, 120);
+            }
+            if (e && typeof e.preventDefault === 'function') e.preventDefault();
 
-                    if (e.shiftKey && activeInvId !== null && isShiftActionFill && !currentState.editMode) {
-                        let inv = globalInventory.find(i => i.id === activeInvId);
-                        if (!inv) return;
-                    }
+            let rStr = cell.getAttribute('data-row');
+            let cStr = cell.getAttribute('data-col');
+            let bayId = cell.getAttribute('data-bay');
+            if (!rStr || !cStr || !bayId) return;
+            let grid = bayGrids[bayId];
+            if (!grid) return;
+            let all_rows = [...grid.rowsAbove, ...grid.rowsBelow];
+            let rIdx = all_rows.indexOf(rStr);
+            let cIdx = grid.cols.indexOf(cStr);
 
-                    if (e.shiftKey && lastClickedCell && lastClickedCell.bayId === bayId) {
-                        let minR = Math.min(rIdx, lastClickedCell.r); let maxR = Math.max(rIdx, lastClickedCell.r);
-                        let minC = Math.min(cIdx, lastClickedCell.c); let maxC = Math.max(cIdx, lastClickedCell.c);
-                        for(let r = minR; r <= maxR; r++) {
-                            for(let c = minC; c <= maxC; c++) {
-                                let targetCoord = `${all_rows[r]}-${grid.cols[c]}`;
-                                if(currentState.editMode) {
-                                     getTwinBays(bayId).forEach(t => shipTopology[t][targetCoord] = isShiftActionFill);
-                                } else {
-                                     if(isShiftActionFill) placeContainer(bayId, all_rows[r], grid.cols[c], false);
-                                     else removeContainer(bayId, all_rows[r], grid.cols[c]);
-                                }
-                            }
-                        }
-                    } else {
-                        let coord = `${rStr}-${cStr}`;
+            if ((e && e.shiftKey) && activeInvId !== null && isShiftActionFill && !currentState.editMode) {
+                let inv = globalInventory.find(i => i.id === activeInvId);
+                if (!inv) return;
+            }
+
+            if ((e && e.shiftKey) && lastClickedCell && lastClickedCell.bayId === bayId) {
+                let minR = Math.min(rIdx, lastClickedCell.r); let maxR = Math.max(rIdx, lastClickedCell.r);
+                let minC = Math.min(cIdx, lastClickedCell.c); let maxC = Math.max(cIdx, lastClickedCell.c);
+                for(let r = minR; r <= maxR; r++) {
+                    for(let c = minC; c <= maxC; c++) {
+                        let targetCoord = `${all_rows[r]}-${grid.cols[c]}`;
                         if(currentState.editMode) {
-                             isShiftActionFill = !shipTopology[bayId][coord];
-                             getTwinBays(bayId).forEach(t => shipTopology[t][coord] = isShiftActionFill); 
+                             getTwinBays(bayId).forEach(t => shipTopology[t][targetCoord] = isShiftActionFill);
                         } else {
-                             let existing = savedShip[bayId][coord];
-                             if(existing && (existing.invId !== undefined || existing.base === 'blocked40')) {
-                                 removeContainer(bayId, rStr, cStr); isShiftActionFill = false; 
-                             } else { placeContainer(bayId, rStr, cStr); isShiftActionFill = true; }
+                             if(isShiftActionFill) placeContainer(bayId, all_rows[r], grid.cols[c], false);
+                             else removeContainer(bayId, all_rows[r], grid.cols[c]);
                         }
-                        lastClickedCell = { r: rIdx, c: cIdx, bayId: bayId };
                     }
-                    recalculateInventory(); renderBayPairsUI();       
-                });
-            });
+                }
+            } else {
+                let coord = `${rStr}-${cStr}`;
+                if(currentState.editMode) {
+                     isShiftActionFill = !shipTopology[bayId][coord];
+                     getTwinBays(bayId).forEach(t => shipTopology[t][coord] = isShiftActionFill); 
+                } else {
+                     let existing = savedShip[bayId] && savedShip[bayId][coord];
+                     if(existing && (existing.invId !== undefined || existing.base === 'blocked40')) {
+                         removeContainer(bayId, rStr, cStr); isShiftActionFill = false; 
+                     } else { placeContainer(bayId, rStr, cStr); isShiftActionFill = true; }
+                }
+                lastClickedCell = { r: rIdx, c: cIdx, bayId: bayId };
+            }
+            recalculateInventory();
+            renderBayPairsUI();
+        }
+
+        function attachCellListeners() {
+            const container = document.getElementById('pairContainer');
+            if (!container) return;
+            container.onpointerdown = function(e) {
+                const cell = e.target && e.target.closest ? e.target.closest('.cell') : null;
+                if (!cell || !container.contains(cell)) return;
+                handleManualCellAction(e, cell);
+            };
+            // Fallback para navegadores antigos/alguns WebViews. O anti-duplicação acima evita duplo clique.
+            container.onmousedown = function(e) {
+                if (window.PointerEvent) return;
+                const cell = e.target && e.target.closest ? e.target.closest('.cell') : null;
+                if (!cell || !container.contains(cell)) return;
+                handleManualCellAction(e, cell);
+            };
+            container.onclick = function(e) {
+                if (window.PointerEvent) return;
+                const cell = e.target && e.target.closest ? e.target.closest('.cell') : null;
+                if (!cell || !container.contains(cell)) return;
+                handleManualCellAction(e, cell);
+            };
         }
 
         initApp();
