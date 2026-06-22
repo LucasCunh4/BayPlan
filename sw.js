@@ -1,4 +1,4 @@
-const CACHE_BUSTER = 'stowage-plan-cachefix-2026-06-20-v8';
+const CACHE_BUSTER = 'stowage-plan-cachefix-2026-06-20-v9';
 
 self.addEventListener('install', event => {
   self.skipWaiting();
