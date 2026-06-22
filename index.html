@@ -1713,7 +1713,7 @@
 
         function generateBayGridHtml(bayId, isPrint = false) {
             let savedData = savedShip[bayId] || {}; let isEditable = currentState.editMode && !isPrint; let bayGrid = bayGrids[bayId];
-            let bayHtml = `<div class="bay-container-wrapper" style="display: flex; flex-direction: column; align-items: center;"><h3 style="font-size: 24px; color: #111; margin: 0 0 10px 0; letter-spacing: 1px;">BAY ${bayId}</h3><div class="bay-container"><div class="axis-title">ROLL</div>`;
+            let bayHtml = `<div class="bay-container-wrapper" style="display: flex; flex-direction: column; align-items: center;"><h3 style="font-size: 24px; color: #111; margin: 0 0 10px 0; letter-spacing: 1px;">BAY ${bayId}</h3><div class="bay-container"><div class="axis-title">ROW</div>`;
             
             let colLabels = `<div class="roll-axis-row"><div class="axis-title-tier tier-title-spacer">${getTierAxisLabelHtml()}</div><div class="row-label" style="visibility: hidden; border: none; pointer-events: none;">00</div><div class="grid-row">`;
             bayGrid.cols.forEach(c => { colLabels += `<div class="axis-label" contenteditable="${isEditable ? 'true' : 'false'}" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" onblur="renameAxis('${bayId}', 'col', '${c}', this)">${c}</div>`; });
